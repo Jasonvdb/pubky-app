@@ -245,10 +245,8 @@ export const runtimeConfigValueSchema = networkConfigValueSchema.extend({
   plausibleDomain: nonEmptyStringValue.optional(),
   plausibleScriptUrl: urlValue.optional(),
   /**
-   * Pubky Pulse browser client key. Absent/empty disables Pulse entirely.
-   * Deliberately NOT format-validated here: this schema parses `window.__PUBKY_CONFIG__` for
-   * every consumer, so a throw on a malformed analytics key would take down app boot. The
-   * `pulse_client_` prefix check is a soft gate in `shouldEnablePulse()` instead.
+   * Absent or empty disables Pulse. Deliberately not format-validated: this schema backs every
+   * consumer of `window.__PUBKY_CONFIG__`, so a throw on a bad analytics key would break boot.
    */
   pulseClientKey: nonEmptyStringValue.optional(),
   previewImage: nonEmptyStringValue.default(APP_RUNTIME_DEFAULTS.previewImage),

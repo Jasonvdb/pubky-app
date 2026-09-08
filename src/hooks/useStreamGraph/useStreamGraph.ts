@@ -52,7 +52,6 @@ export type UseStreamGraphResult = {
   isExpanding: boolean;
   isTracing: boolean;
   select: (id: string | null) => void;
-  /** Widened to the core's own signature so the feed can name the affordance that expanded */
   expand: (nodeId: string, anchorId?: string, source?: GraphExpandSource) => Promise<void>;
   refreshNode: (nodeId: string) => Promise<void>;
   /** Design click behavior: focus + one-time expand pruned around the clicked user */
@@ -83,8 +82,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
   const [focusOverride, setFocusOverride] = useState<string | null>(null);
   const gatherNonce = useRef(0);
   const seededFor = useRef<Pubky | null>(null);
-  // The relationship live query re-runs on every graph mutation, so its failure
-  // is reported once per mount rather than once per re-run
+  // The live query re-runs on every graph mutation; its failure is reported once per mount
   const relsFailureReported = useRef(false);
 
   const postKey = postIds.join(',');
@@ -253,7 +251,6 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
           return mergeGraph(prev, synthesized);
         });
       } catch (err) {
-        // The canvas is empty without this: the feed's whole graph comes from here
         Logger.error('useStreamGraph: failed to synthesize stream graph', err);
         pulseGraphError(err, GRAPH_ERROR_EVENTS.STREAM_SYNTHESIS_FAILED, { surface: FEED_SURFACE });
       }
@@ -275,8 +272,6 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
       }
       return map;
     } catch (error) {
-      // Degraded, not broken: the graph still renders, with everyone painted
-      // as an extended relationship
       Logger.error('useStreamGraph: failed to query author relationships', { error });
       if (!relsFailureReported.current) {
         relsFailureReported.current = true;

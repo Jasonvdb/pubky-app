@@ -43,14 +43,9 @@ export interface StreamGraphPostsProps {
 
 type HoverCard = { node: NexusGraphUserNode; x: number; y: number };
 
-/**
- * The graph layout is a mode inside several stream routes (`/home`, `/search`, ...),
- * not a route of its own, so it reports a synthetic screen name the SDK's own
- * page-view tracking could never produce.
- */
+/** The graph layout is a mode inside several stream routes, not a route of its own. */
 const FEED_GRAPH_SCREEN = '/feed/graph';
 
-/** `graph_control_used` for this surface. */
 const recordControl = (control: string, state?: 'on' | 'off') => pulseGraphControl(FEED_SURFACE, control, state);
 
 /**
@@ -96,9 +91,7 @@ export function StreamGraphPosts({
     pathIds: useCallback(() => graphPathIds, [graphPathIds]),
   });
 
-  // Mount, not the layout picker: the same arrival happens when a stored layout
-  // preference restores the graph without a click. Ref-guarded, since React 19
-  // StrictMode double-invokes effects in development.
+  // Mount, not the layout picker: a stored preference can restore the graph without a click
   const layoutReported = useRef(false);
   useEffect(() => {
     if (layoutReported.current) return;
@@ -106,10 +99,8 @@ export function StreamGraphPosts({
     pulseEvent(GRAPH_EVENTS.LAYOUT_SELECTED, { surface: FEED_SURFACE });
   }, []);
 
-  // The synthetic screen name is owned only while this layout is mounted.
-  // `PulseInit` reports the route itself, so leaving the layout — a switch back
-  // to a list layout, or a navigation away — has to hand the route's own screen
-  // back, or every later event in the session still reports '/feed/graph'.
+  // Owned only while this layout is mounted: the cleanup hands the route's own screen back,
+  // or every later event in the session still reports '/feed/graph'
   const pathname = usePathname();
   useEffect(() => {
     if (!pathname) return;
@@ -297,8 +288,6 @@ export function StreamGraphPosts({
               graph.toggleDeclutter();
             }}
             communitiesOn={false}
-            // Communities are an explorer lens; the row is inert here, so there is
-            // no outcome to report
             onToggleCommunities={() => undefined}
             edgeChipsOn={edgeChipsOn}
             onToggleEdgeChips={() => {
@@ -331,7 +320,6 @@ export function StreamGraphPosts({
                 hiddenClasses={graph.hiddenClasses}
                 onHoverClass={spotlightClass}
                 onToggleClass={(cls) => {
-                  // `state` is what the row becomes: toggling a hidden class shows it again
                   recordControl(`legend-${cls}`, graph.hiddenClasses.has(cls) ? 'on' : 'off');
                   graph.toggleClass(cls);
                 }}
@@ -413,7 +401,6 @@ export function StreamGraphPosts({
           className={cn(GRAPH_PILL_CLASS, 'absolute bottom-6 left-6 w-auto gap-2 px-3.5 text-xs font-bold')}
           disabled={loadingMore}
           onClick={() => {
-            // The pre-merge total, so the breakdown reads as "grew from N"
             pulseEvent(GRAPH_EVENTS.STREAM_MERGE_MORE, {
               surface: FEED_SURFACE,
               total_nodes: String(graph.rawNodeCount),

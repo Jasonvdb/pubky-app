@@ -9,37 +9,27 @@ import {
 import { RAW_PUBKY_PATTERN } from '@/libs/observability/sentry.constants';
 
 /**
- * Pubky Pulse taxonomy for the graph explorer (`/graph`) and the feed "Graph" layout.
+ * Pubky Pulse taxonomy for the graph explorer (`/graph`) and the feed "Graph" layout: event
+ * names, funnel steps and metric slugs, none of which are normalized server-side.
  *
- * This module is the single source of truth for every graph event name, funnel step and metric
- * slug: names are never normalized server-side, so a typo silently becomes its own event.
- * Import the constants — do not inline string literals at call sites.
+ * Privacy invariant: attributes carry counts, kinds, durations and enums only — never a pubky,
+ * tag label, post id, post content, or a prefixed node id.
  *
- * Two hard constraints:
- * - **No SDK import.** It talks to `pulse.ts` only, which owns the containment boundary.
- *   `@/libs/error/error` and the dependency-free `sentry.constants` are the only other imports —
- *   in particular NOT `error.utils`, whose `Err.*` re-export would drag the Sentry SDK into
- *   every server bundle that touches the graph.
- * - **Server-safe.** It is imported by Application-layer code that also runs on the server, so
- *   it must never read `window`, `location` or `document` at module scope or in a helper.
- *
- * Privacy (see `docs/pulse.md`): attributes carry counts, kinds, durations and enums only.
- * Never a pubky, tag label, post id, post content, or a prefixed node id.
+ * Server-safe by contract (Application-layer code imports it): no `window`, no SDK import, and
+ * never `@/libs/error/error.utils`, whose `Err.*` re-export would pull the Sentry SDK into every
+ * server bundle that touches the graph.
  */
 
-/** Which graph surface produced the event. Stamped on every event below as `surface`. */
+/** Stamped on every event below as `surface`. */
 export type Surface = 'explorer' | 'feed';
 
-/** The explorer page (`/graph`). */
 export const EXPLORER_SURFACE: Surface = 'explorer';
 
-/** The feed's "Graph" layout. */
 export const FEED_SURFACE: Surface = 'feed';
 
-/** Funnel that measures how far a session gets into the explorer. */
 export const GRAPH_FUNNEL_SLUG = 'graph-explore';
 
-/** Funnel steps, verbatim. Each fires at most once per mount (ref-guarded at the call site). */
+/** Each step fires at most once per mount (ref-guarded at the call site). */
 export const GRAPH_FUNNEL_STEPS = {
   OPENED: 'graph-explore-opened',
   LOADED: 'graph-explore-loaded',
@@ -47,14 +37,12 @@ export const GRAPH_FUNNEL_STEPS = {
   TRACED: 'graph-explore-traced',
 } as const;
 
-/** Operation slugs. Each wraps one async unit of work with a start + single terminal event. */
 export const GRAPH_METRICS = {
   NEIGHBORHOOD_LOAD: 'graph-neighborhood-load',
   NODE_EXPAND: 'graph-node-expand',
   PATH_TRACE: 'graph-path-trace',
 } as const;
 
-/** Product events. See `docs/pulse.md` for the attribute of each and the never-instrument list. */
 export const GRAPH_EVENTS = {
   OPENED: 'graph_opened',
   LOADED: 'graph_loaded',
@@ -71,7 +59,7 @@ export const GRAPH_EVENTS = {
   AUTO_DECLUTTERED: 'graph_auto_decluttered',
 } as const;
 
-/** Failure events, one per catch site. Emitted through the two bridges at the bottom of the file. */
+/** Failure events, one per catch site, emitted through the two bridges at the bottom of the file. */
 export const GRAPH_ERROR_EVENTS = {
   LOAD_FAILED: 'graph_load_failed',
   ADD_USER_FAILED: 'graph_add_user_failed',
@@ -88,15 +76,9 @@ export const GRAPH_ERROR_EVENTS = {
 const GRAPH_PATH_PREFIX = '/v0/graph/';
 
 /**
- * Positional vocabulary for a nexus graph request path — one entry per path segment.
- *
- * `graphApi` builds exactly two shapes, `/v0/graph/{kind}/{id}` and
- * `/v0/graph/path/{from}/{to}`, so the first three segments are a fixed vocabulary (`kind`
- * is already a safe attribute elsewhere) and everything after them is an id. Redacting by
- * POSITION rather than by segment shape is what makes this safe: `graphApi` runs every id
- * through `encodeURIComponent`, so a `post:<author>:<id>` node id arrives as
- * `post%3A<author>%3A<id>` with no `:` left to split on, and a tag label is arbitrary
- * user-authored text that can look exactly like a route word.
+ * Positional vocabulary for a nexus graph request path — one entry per segment. Redacting by
+ * POSITION rather than by segment shape is what makes this safe: `graphApi` runs every id through
+ * `encodeURIComponent`, and a tag label is user-authored text that can look like a route word.
  */
 const GRAPH_PATH_VOCABULARY: readonly ReadonlySet<string>[] = [
   new Set(['v0']),
@@ -105,13 +87,8 @@ const GRAPH_PATH_VOCABULARY: readonly ReadonlySet<string>[] = [
 ];
 
 /**
- * The `_http_url` value: request path only, with every identifying segment redacted, so
- * `/v0/graph/tag/<label>` reports as `/v0/graph/tag/*` and both ids of
- * `/v0/graph/path/<from>/<to>` are replaced the same way.
- *
- * The origin and query string are dropped deliberately — the origin can be a
- * `_pubky.<pubky>` host and the query carries pagination noise, and neither adds anything to
- * a failure breakdown that the route shape does not already give.
+ * The `_http_url` value: request path only, every identifying segment redacted. The origin can be
+ * a `_pubky.<pubky>` host and the query adds nothing to a failure breakdown, so both are dropped.
  */
 function toSafeHttpPath(endpoint: unknown): string | undefined {
   if (typeof endpoint !== 'string' || endpoint.length === 0) return undefined;
@@ -120,7 +97,7 @@ function toSafeHttpPath(endpoint: unknown): string | undefined {
   try {
     path = new URL(endpoint).pathname;
   } catch {
-    // A relative endpoint (or a malformed one) never reaches `URL`; keep it minus the query.
+    // A relative or malformed endpoint never parses; keep it minus the query.
     path = endpoint.split('?')[0];
   }
 
@@ -128,23 +105,15 @@ function toSafeHttpPath(endpoint: unknown): string | undefined {
     return redactPathSegments(path, (segment, index) => GRAPH_PATH_VOCABULARY[index]?.has(segment) ?? false);
   }
 
-  // Belt and braces for any non-graph endpoint that reaches this bridge: a bare pubky is the
-  // one identifier recognisable without knowing the route it sits in.
+  // Non-graph endpoint: a bare pubky is the one identifier recognisable without its route.
   return path.replace(RAW_PUBKY_PATTERN, REDACTED_PATH_SEGMENT);
 }
 
 /**
- * Translate an `AppError` into Pulse attributes.
- *
- * `fetchNexus` throws `httpResponseToError(...)`, an `AppError` whose `context` carries
- * `endpoint` and `statusCode`. Its network and abort paths come from `safeFetch`, which
- * files the same value under `url` instead — read both, or the HTTP breakdown goes missing
- * exactly when the request never reached the server. All of these are typed `unknown`, so
- * they are narrowed before use.
- *
- * `_`-prefixed keys are SDK-reserved; `_http_url` / `_http_status` / `_http_method` are the
- * three supported ones, and no others may be invented. `_http_status` is omitted when the
- * request never got a response (a network failure), which is itself the signal.
+ * `fetchNexus` files the failed URL under `context.endpoint`, while `safeFetch`'s network and
+ * abort paths file it under `context.url` — read both, or the HTTP breakdown goes missing exactly
+ * when the request never reached the server. `_http_url` / `_http_status` / `_http_method` are
+ * the only SDK-reserved keys supported, and a missing status is itself the network signal.
  */
 function toErrorAttributes(error: unknown): Record<string, string> {
   if (!isAppError(error)) return {};
@@ -167,28 +136,14 @@ function toErrorAttributes(error: unknown): Record<string, string> {
   return attributes;
 }
 
-/**
- * Report a graph failure at error level, enriched with the HTTP and `AppError` breakdown.
- *
- * Add it alongside the existing `Logger.*` / `Err.*` call at a catch site — never as a second
- * log line, and never in place of the user-facing handling.
- */
+/** Report a graph failure at error level, enriched with the HTTP and `AppError` breakdown. */
 export function pulseGraphError(err: unknown, name: string, attrs?: Record<string, string>): void {
   pulseCaptureError(err, name, { ...toErrorAttributes(err), ...attrs });
 }
 
 /**
- * Identity for a thrown value that is not an `AppError`, so a warn is still triageable.
- *
- * `pulseGraphError` keeps that identity for free — `pulseCaptureError` hands the thrown value
- * itself to the SDK. `pulseWarn` takes only a name and attributes, so without this a plain
- * `throw` inside a degradation path arrives as a bare event name.
- *
- * The message is swept for bare pubkys for the same reason `_http_url` is: a thrown message
- * can quote a URL, and §Privacy forbids shipping the identifier inside it. This is also why
- * the message is derived here rather than through `getErrorMessage`: `@/libs/error/error.utils`
- * re-exports the `Err.*` factories, which would pull the Sentry SDK into every server bundle
- * that touches the graph (see the module docstring).
+ * Identity for a thrown value that is not an `AppError`, so a warn is still triageable. The
+ * message can quote a URL, so it is swept for bare pubkys before it ships.
  */
 function toThrownValueAttributes(error: unknown): Record<string, string> {
   if (!(error instanceof Error)) return { error_type: typeof error };
@@ -199,20 +154,15 @@ function toThrownValueAttributes(error: unknown): Record<string, string> {
   };
 }
 
-/**
- * Same enrichment at warn level, for degradations rather than failures — a failed Dexie
- * backfill or a missing relationship batch leaves a usable graph, so it must not raise an
- * error-rate alarm.
- */
+/** Same enrichment at warn level, for degradations that leave a usable graph. */
 export function pulseGraphWarn(err: unknown, name: string, attrs?: Record<string, string>): void {
   const breakdown = isAppError(err) ? toErrorAttributes(err) : toThrownValueAttributes(err);
   pulseWarn(name, { ...breakdown, ...attrs });
 }
 
 /**
- * `graph_control_used`: one event with a `control` breakdown, never one event per control.
- * `control` is the control's `data-cy` suffix verbatim, and `state` is what the control
- * becomes (omitted for the ones that do not toggle).
+ * One event with a `control` breakdown, never one event per control. `control` is the control's
+ * `data-cy` suffix verbatim, and `state` is what the control becomes.
  */
 export function pulseGraphControl(surface: Surface, control: string, state?: 'on' | 'off'): void {
   pulseEvent(GRAPH_EVENTS.CONTROL_USED, { surface, control, ...(state ? { state } : {}) });

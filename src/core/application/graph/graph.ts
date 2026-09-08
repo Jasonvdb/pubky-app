@@ -42,8 +42,7 @@ export class GraphApplication {
    * TTL in one shot. Ghost post nodes get hydrated the same way.
    */
   private static async ingestGraphEntities(graph: NexusGraph, viewerId?: Pubky | null): Promise<void> {
-    // Hoisted so the failure report below can say how much of the payload was
-    // left uncached, which is what makes a backfill failure actionable
+    // Hoisted so the failure report below can say how much was left uncached
     const userIds: Pubky[] = [];
     const postIds: string[] = [];
     try {
@@ -69,8 +68,6 @@ export class GraphApplication {
       // tags-table miss check internally.
       await UserApplication.getManyTagsOrFetch({ userIds });
     } catch (error) {
-      // Warn, not error: the backfill is a cache warm-up, so losing it degrades
-      // hover and selection surfaces without breaking the canvas itself
       Logger.warn('GraphApplication: failed to ingest graph entities', { error });
       pulseGraphWarn(error, GRAPH_ERROR_EVENTS.INGEST_FAILED, {
         node_count: String(graph.nodes.length),

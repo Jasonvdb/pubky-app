@@ -4,42 +4,22 @@ import { Logger } from '@/libs/logger/logger';
 import { getPulseClientKey, getTestnet } from '@/libs/runtime-config/runtime-config';
 
 /**
- * Single source of truth for Pubky Pulse (product analytics) in the browser.
+ * Pubky Pulse (product analytics) in the browser.
  *
- * Containment rule — do NOT import `@synonymdev/pubky-pulse-web` outside this file (the capture
- * funnel every feature call goes through). `initPulse()` is called from exactly one place:
- * `src/components/atoms/PulseInit/PulseInit.tsx`, mounted in the root layout.
- *
- * Feature code imports the taxonomy wrappers in `pulse.graph.ts`, or the helpers below.
- * That keeps the SDK swappable and keeps the "disabled" path in exactly one place.
- *
- * Pulse ships dark: with no client key configured — the default in dev, test, CI and any deploy
- * that has not opted in — nothing is configured, no listener is installed, and no request
- * leaves the browser. See `docs/pulse.md`.
+ * Containment rule: `@synonymdev/pubky-pulse-web` is imported here and nowhere else. Feature
+ * code goes through the taxonomy wrappers in `pulse.graph.ts` or the helpers below.
  */
 
-/** Bundle id of the Pulse app record that owns these events. Immutable once events exist. */
+/** Immutable once events exist. */
 const PULSE_BUNDLE_ID = 'graph.pubky.app';
 
-/** Every Pulse browser key carries this prefix; anything else is a misconfiguration. */
 const CLIENT_KEY_PREFIX = 'pulse_client_';
 
-/** Stand-in for any identifying path segment. Short so the route shape stays readable. */
 export const REDACTED_PATH_SEGMENT = '*';
 
 /**
- * Rewrite a URL path, keeping only the segments the caller vouches for and replacing every
- * other one with `*`.
- *
- * The one redaction shared by the two places a path becomes an attribute: the screen name
- * reported for the current route (`PulseInit`) and the `_http_url` of a failed request
- * (`pulse.graph.ts`). Both decide by POSITION — the caller says which vocabulary is legal
- * where — never by the shape of the value. Shape is not a safe discriminator: ids are
- * `encodeURIComponent`-escaped on the way into a URL, and a tag label is arbitrary
- * user-authored text that can look exactly like a route word.
- *
- * `index` counts only non-empty segments, so `/v0/graph/tag/<label>` sees `0..3`; empty
- * segments (the leading one, and any trailing slash) are preserved verbatim.
+ * Replace every path segment the caller does not vouch for with `*`. `index` counts only
+ * non-empty segments, so `/v0/graph/tag/<label>` sees `0..3`.
  */
 export function redactPathSegments(path: string, isSafeSegment: (segment: string, index: number) => boolean): string {
   let index = 0;
@@ -55,70 +35,36 @@ export function redactPathSegments(path: string, isSafeSegment: (segment: string
     .join('/');
 }
 
-/**
- * True only after `Pulse.configure()` returned without throwing.
- *
- * The SDK has no "is configured" accessor of its own, so this module owns the flag. A throw
- * inside `initPulse()` deliberately leaves it false, which makes every helper below a
- * permanent no-op for the life of the page rather than a repeated failed call.
- */
+/** True only after `Pulse.configure()` returned without throwing. */
 let configured = false;
 
-/**
- * True once `Pulse.configure()` threw. Together with `configured` it makes `configure()`
- * at-most-once for the life of the page, while leaving `initPulse()` itself safe to call again:
- * a closed gate latches nothing, because the gate can be closed merely because
- * `window.__PUBKY_CONFIG__` has not been injected yet when the caller runs.
- */
+/** Set once `Pulse.configure()` threw, so it is never retried. */
 let configureFailed = false;
 
-/**
- * A tracked operation as call sites see it: start it, then finish it exactly once.
- *
- * Structurally a subset of the SDK's `PulseOperation`, so `pulseOperation()` can hand back
- * either the real handle (wrapped so a terminal call can never throw into app code) or the
- * shared no-op below — and no call site needs an `if (enabled)` branch.
- */
+/** A tracked operation as call sites see it: start it, then finish it exactly once. */
 export interface PulseOp {
   complete(attrs?: Record<string, string>): void;
   fail(error: unknown, attrs?: Record<string, string>): void;
   cancel(attrs?: Record<string, string>): void;
 }
 
-/** Returned whenever Pulse is inactive. Shared and frozen: it holds no per-operation state. */
+/** Returned whenever Pulse is inactive; shared because it holds no per-operation state. */
 const NOOP_OPERATION: PulseOp = Object.freeze({
   complete: () => {},
   fail: () => {},
   cancel: () => {},
 });
 
-/**
- * Run one SDK call, swallowing anything it throws.
- *
- * Telemetry is never load-bearing: an ingest failure, a quota trip or an SDK bug must not
- * escape into the feature code that emitted the event. Swallowing silently (rather than
- * logging) is deliberate — these calls sit on hot paths like node expansion.
- */
+/** Run one SDK call, swallowing anything it throws. */
 function safely(call: () => void): void {
   try {
     call();
   } catch {
-    // Intentionally ignored: analytics must never break the surface it measures.
+    // Intentionally ignored: telemetry is never load-bearing.
   }
 }
 
-/**
- * Whether Pulse should be initialized in the current runtime.
- * False during tests, testnet deployments, and when no client key is configured.
- *
- * Mirrors `shouldEnableSentry()` gate-for-gate, including the `!Env` circular-dependency
- * guard and the try/catch around runtime-config resolution: a misconfigured deploy whose
- * `PUBKY_RUNTIME_*` cannot resolve means "Pulse disabled", never a throw.
- *
- * The `pulse_client_` prefix check lives here rather than in the runtime-config schema on
- * purpose: `runtimeConfigValueSchema.parse()` backs every consumer of the runtime config, so
- * rejecting a malformed analytics key there would turn an analytics typo into a boot failure.
- */
+/** Mirrors `shouldEnableSentry()` gate-for-gate, including the `!Env` circular-dependency guard. */
 export function shouldEnablePulse(): boolean {
   if (!Env) return false;
   if (Env.NODE_ENV === 'test') return false;
@@ -135,34 +81,8 @@ export function shouldEnablePulse(): boolean {
 }
 
 /**
- * Configure the SDK. The ONLY caller of `Pulse.configure()`, called from
- * `src/components/atoms/PulseInit/PulseInit.tsx`.
- *
- * Never call `configure()` at module scope: `pulse.graph.ts` is imported by Application-layer
- * code that also runs on the server, and an accidental server-side import of this module must
- * not be able to start a browser SDK.
- *
- * Safe to call repeatedly. A closed gate is not latched — `shouldEnablePulse()` also returns
- * false when the runtime config simply is not resolvable yet — so an early caller can never
- * disable Pulse for the life of the page. `Pulse.configure()` still runs at most once: the
- * `configured` / `configureFailed` pair short-circuits every later call.
- *
- * Non-default options, and why:
- * - `consoleLogging: false` — the SDK default (true) would mirror every event to the
- *   production console.
- * - `captureUnhandled: false` — app-wide `error` / `unhandledrejection` listeners would
- *   duplicate what Sentry's `globalHandlers` integration already reports.
- * - `trackPageViews: false` — the SDK's own page-view tracking sends `location.pathname`
- *   verbatim on every History API navigation, and this app's routes carry pubkys, post ids
- *   and invite codes (`/profile/<pubky>`, `/invite/<code>`). Page views are still tracked
- *   app-wide, but through `PulseInit`, which redacts the pathname first — the funnel
- *   denominator is kept, the identifiers are not.
- *
- * Everything else is deliberately left at its SDK default: `endpoint` (hosted ingest),
- * `isDev` (resolves localhost / 127.0.0.1 / file: correctly), `networkTracking` (false —
- * the graph fires many fetches and per-request events are pure noise), and
- * `propagateSessionTo` / `supportedLanguages` (nexus is a separate Rust service, and the
- * language list belongs to the server-side app record).
+ * The only caller of `Pulse.configure()`. Safe to call repeatedly: a closed gate is not
+ * latched, because the runtime config may simply not be resolvable yet.
  */
 export function initPulse(): void {
   if (configured || configureFailed) return;
@@ -175,13 +95,12 @@ export function initPulse(): void {
       appVersion: Env.NEXT_PUBLIC_APP_VERSION,
       consoleLogging: false,
       captureUnhandled: false,
+      // The SDK would send `location.pathname` verbatim; `PulseInit` reports a redacted screen
       trackPageViews: false,
     });
   } catch (error) {
-    // `Pulse.configure()` throws on invalid values. Report it as a warning, NOT through an
-    // `Err.*` factory: those route to Sentry, and a telemetry misconfiguration must not file
-    // a production issue. `configured` stays false, so every helper below stays a no-op, and
-    // `configureFailed` stops a later `initPulse()` from re-running a call that throws again.
+    // A warning, not an `Err.*` factory: those route to Sentry, and a telemetry
+    // misconfiguration must not file a production issue or break the app.
     configureFailed = true;
     Logger.warn('Pulse configuration failed; analytics disabled for this session', error);
     return;
@@ -195,24 +114,19 @@ export function isPulseActive(): boolean {
   return configured;
 }
 
-/** Record a product event at info level. */
 export function pulseEvent(name: string, attrs?: Record<string, string>): void {
   if (!configured) return;
   safely(() => Pulse.info(name, attrs));
 }
 
-/** Record a degraded-but-not-broken outcome at warn level. */
 export function pulseWarn(name: string, attrs?: Record<string, string>): void {
   if (!configured) return;
   safely(() => Pulse.warn(name, attrs));
 }
 
 /**
- * Record a failure at error level.
- *
- * The non-Error wrap is load-bearing: `Pulse.error` is overloaded, and passing a string as
- * the first argument selects the logger overload, which shifts every later argument into the
- * wrong slot (the event name would be read as attributes).
+ * The non-Error wrap is load-bearing: `Pulse.error` is overloaded, and a string first argument
+ * selects the logger overload, which shifts the event name into the attributes slot.
  */
 export function pulseCaptureError(err: unknown, name: string, attrs?: Record<string, string>): void {
   if (!configured) return;
@@ -220,26 +134,19 @@ export function pulseCaptureError(err: unknown, name: string, attrs?: Record<str
   safely(() => Pulse.error(error, name, attrs));
 }
 
-/** Record one funnel step. Step names are never normalized server-side — a typo is a new step. */
+/** Step names are never normalized server-side — a typo silently becomes its own step. */
 export function pulseStep(step: string, attrs?: Record<string, string>): void {
   if (!configured) return;
   safely(() => Pulse.step(step, attrs));
 }
 
-/**
- * Report a screen. The SDK's own page-view tracking is off (it would ship raw pathnames), so
- * every screen comes from here: `PulseInit` for the redacted route, feature code for a screen
- * a route cannot express (a canvas mode, a modal).
- */
 export function pulseScreen(name: string): void {
   if (!configured) return;
   safely(() => Pulse.trackScreen(name));
 }
 
 /**
- * Start a tracked operation: a `metric:<slug>:start` now and exactly one terminal event when
- * the returned handle is completed, failed or cancelled.
- *
+ * Start a tracked operation: a `metric:<slug>:start` now and exactly one terminal event.
  * Always returns a usable handle, so call sites finish the operation unconditionally.
  */
 export function pulseOperation(slug: string, attrs?: Record<string, string>): PulseOp {

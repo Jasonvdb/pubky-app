@@ -9,10 +9,7 @@ export const MAX_CLIENT_NODES = 400;
 /** Visible-edge threshold that auto-engages declutter (once per session). */
 export const AUTO_DECLUTTER_EDGES = 600;
 
-/**
- * Which affordance triggered an expansion. Reported as the `source` of
- * `graph_node_expanded`, so the values are the taxonomy's, verbatim.
- */
+/** Which affordance triggered an expansion. Reported as the `source` of `graph_node_expanded`. */
 export type GraphExpandSource = 'double_click' | 'panel' | 'refresh' | 'search_pick' | 'tag_chip';
 
 /** Which affordance started a path trace. Reported as the `via` of the path events. */

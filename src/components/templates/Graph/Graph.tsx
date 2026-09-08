@@ -45,29 +45,19 @@ import { useGraphStore } from '@/stores/graph/graph.store';
 type TagEdgePopover = { labels: string[]; sourceId: string; targetId: string; x: number; y: number };
 type HoverCard = { node: NexusGraphUserNode; x: number; y: number };
 
-/**
- * Fire a funnel step at most once per mount. React 19 StrictMode double-invokes
- * effects in development, and a re-fired step blurs the drop-off the funnel exists
- * to measure. Module-level so it never lands in a hook dependency array.
- */
+/** Fire a funnel step at most once per mount; a re-fired step blurs the drop-off it measures. */
 function fireOnce(fired: MutableRefObject<boolean>, step: string): void {
   if (fired.current) return;
   fired.current = true;
   pulseStep(step);
 }
 
-/** `graph_control_used` for this surface. */
 const recordControl = (control: string, state?: 'on' | 'off') => pulseGraphControl(EXPLORER_SURFACE, control, state);
 
-/** `graph_search_pick`. The pick's own expand marks the funnel step that follows it. */
 function recordSearchPick(kind: 'user' | 'tag', origin: 'header' | 'inline'): void {
   pulseEvent(GRAPH_EVENTS.SEARCH_PICK, { surface: EXPLORER_SURFACE, kind, origin });
 }
 
-/**
- * The funnel's first-interaction step. Every expand, recenter and search pick
- * marks it, and only the first of them reaches Pulse.
- */
 function markInteracted(interacted: MutableRefObject<boolean>): void {
   fireOnce(interacted, GRAPH_FUNNEL_STEPS.INTERACTED);
 }
@@ -113,7 +103,6 @@ export function Graph() {
     if (centerPubky) load(centerPubky);
   }, [centerPubky, load]);
 
-  // Funnel guards: each step is once per mount, and the refs are what make that hold
   const openedStep = useRef(false);
   const interactedStep = useRef(false);
   const tracedStep = useRef(false);
@@ -121,23 +110,18 @@ export function Graph() {
   useEffect(() => {
     if (openedStep.current) return;
     openedStep.current = true;
-    // No screen call here: `PulseInit` reports every route app-wide, and its
-    // redaction leaves '/graph' verbatim, so a second one is the same event twice
+    // No screen call: `PulseInit` already reports '/graph' app-wide
     pulseEvent(GRAPH_EVENTS.OPENED, {
       surface: EXPLORER_SURFACE,
-      // How the page was reached; never who it was reached for
       entry: searchParams.get('user') ? 'deeplink' : currentUserPubky ? 'self' : 'anonymous',
       is_mobile: String(isMobile),
     });
     pulseStep(GRAPH_FUNNEL_STEPS.OPENED);
   }, [searchParams, currentUserPubky, isMobile]);
 
-  // A successful trace is only observable from here as a committed path
   useEffect(() => {
     if (!graph.pathIds || graph.pathIds.length === 0) return;
-    // The hover card can trace without any preceding expand, recenter or search
-    // pick, so step 3 may still be unfired; a skipped step makes the drop-off
-    // between it and step 4 meaningless. Both stay once-per-mount via their refs.
+    // A hover-card trace can skip step 3 entirely, which would make its drop-off meaningless
     markInteracted(interactedStep);
     fireOnce(tracedStep, GRAPH_FUNNEL_STEPS.TRACED);
   }, [graph.pathIds]);
@@ -356,8 +340,6 @@ export function Graph() {
       void recenter(nodeId);
       canvasRef.current?.centerOn(nodeId);
     } else {
-      // Nothing to recenter onto yet: this branch adds the user instead, and
-      // reports itself as the expand it is
       void handlePickUser(currentUserPubky);
     }
   }, [currentUserPubky, graph.nodes, recenter, handlePickUser]);
@@ -580,7 +562,6 @@ export function Graph() {
                 hiddenClasses={graph.hiddenClasses}
                 onHoverClass={spotlightClass}
                 onToggleClass={(cls) => {
-                  // `state` is what the row becomes: toggling a hidden class shows it again
                   recordControl(`legend-${cls}`, graph.hiddenClasses.has(cls) ? 'on' : 'off');
                   graph.toggleClass(cls);
                 }}

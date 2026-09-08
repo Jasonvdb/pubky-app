@@ -75,7 +75,6 @@ export type GraphCoreOptions = {
    * this off: its posts ARE the content being visualized.
    */
   capPostsByTier?: boolean;
-  /** Which graph surface this instance drives; stamped on every Pulse event it emits */
   surface: Surface;
 };
 
@@ -245,7 +244,6 @@ export function useGraphCore({
       if (!node || isExpanding) return;
       if (!force && expandedIds.has(nodeId)) return;
       const nonce = loadNonce.current;
-      // Started after the guards, so a call that expands nothing is not an attempt
       const op = pulseOperation(GRAPH_METRICS.NODE_EXPAND, { surface, kind: node.kind });
       setIsExpanding(true);
       try {
@@ -264,15 +262,12 @@ export function useGraphCore({
         // around the OLD focus and could evict the just-clicked cluster
         mergeNeighborhood(neighborhood, node, anchorId);
         setExpandedIds((prev) => new Set(prev).add(nodeId));
-        // Counted against the pre-merge graph: the budget prune that may follow
-        // is a cap, not part of what the click asked for
         const known = new Set(graph.nodes.map((n) => n.id));
         const added = neighborhood.nodes.reduce((total, n) => total + (known.has(n.id) ? 0 : 1), 0);
         const counts = { added_nodes: String(added), total_nodes: String(graph.nodes.length + added) };
         pulseEvent(GRAPH_EVENTS.NODE_EXPANDED, {
           surface,
-          // A recenter expands as a side effect and has no affordance in the
-          // taxonomy, so its source is omitted rather than guessed
+          // A recenter expands as a side effect with no affordance to name, so it omits `source`
           ...(source ? { source } : {}),
           kind: node.kind,
           ...counts,
@@ -351,14 +346,10 @@ export function useGraphCore({
         const me = graph.nodes.find((n) => n.id === `user:${currentUserPubky}`) ?? null;
         mergeNeighborhood(path, me, me?.id);
         setPathIds(path.nodes.map((n) => n.id));
-        // "No route" reaches us in two shapes and only the fork running behind
-        // this client knows which: an empty path here, or a not-found throw below
         if (path.nodes.length === 0) {
           pulseEvent(GRAPH_EVENTS.PATH_NOT_FOUND, { ...attrs, reason: 'empty' });
           op.complete({ found: 'false' });
         } else {
-          // A path of N nodes is N-1 hops: a direct connection is 2 nodes, 1 hop.
-          // The empty case is the sibling branch above, so this never goes negative.
           const hops = String(Math.max(0, path.nodes.length - 1));
           pulseEvent(GRAPH_EVENTS.PATH_TRACED, { ...attrs, hops });
           op.complete({ found: 'true', hops });
@@ -367,8 +358,7 @@ export function useGraphCore({
         Logger.error(`${logTag}: failed to trace path`, err);
         toast({ description: t('states.noPath') });
         if (isAppError(err) && isNotFound(err)) {
-          // The backend answered: there is no path. An outcome, not a failure,
-          // so it must not count against the trace success rate
+          // The backend answered: there is no path. An outcome, not a failure
           pulseEvent(GRAPH_EVENTS.PATH_NOT_FOUND, { ...attrs, reason: 'not_found' });
           op.complete({ found: 'false' });
         } else {

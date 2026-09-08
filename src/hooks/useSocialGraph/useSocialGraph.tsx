@@ -42,7 +42,7 @@ export function useSocialGraph(): UseSocialGraphResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(false);
   const autoDecluttered = useRef(false);
-  // The funnel's "loaded" step is one per mount; StrictMode and every retry re-enter load()
+  // Once per mount: StrictMode and every retry re-enter load()
   const loadedStep = useRef(false);
 
   const { currentUserPubky: viewerPubky } = useAuthStore();
@@ -108,7 +108,6 @@ export function useSocialGraph(): UseSocialGraphResult {
           currentUserPubky,
         );
         if (nonce !== loadNonce.current) {
-          // A newer load() superseded this one; it is neither a success nor a failure
           op.cancel();
           return;
         }
@@ -126,7 +125,6 @@ export function useSocialGraph(): UseSocialGraphResult {
           surface: EXPLORER_SURFACE,
           ...counts,
           duration_ms: String(Date.now() - startedAt),
-          // A lone center node is a graph with nothing to explore
           is_empty: String(neighborhood.nodes.length <= 1),
         });
         op.complete(counts);
@@ -252,7 +250,6 @@ export function useSocialGraph(): UseSocialGraphResult {
     autoDecluttered.current = true;
     setDeclutter(true);
     toast({ description: t('states.autoDeclutter') });
-    // Warn level: the view still works, but the design's default was overridden for it
     pulseWarn(GRAPH_EVENTS.AUTO_DECLUTTERED, { surface: EXPLORER_SURFACE, edge_count: String(realEdgeCount) });
   }, [realEdgeCount, setDeclutter, t]);
 
