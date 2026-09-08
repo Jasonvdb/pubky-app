@@ -14,6 +14,8 @@ import type { HideableClass } from '@/hooks/useSocialGraph/useSocialGraph.types'
 import { socialProof } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useStreamGraph } from '@/hooks/useStreamGraph/useStreamGraph';
 import { useTrackedPoint } from '@/hooks/useTrackedPoint/useTrackedPoint';
+import { pulseEvent, pulseScreen } from '@/libs/observability/pulse';
+import { GRAPH_EVENTS, type Surface } from '@/libs/observability/pulse.graph';
 import { cn } from '@/libs/utils/utils';
 import type { Pubky } from '@/models/models.types';
 import { GraphTimeMachine } from '@/molecules/GraphTimeMachine/GraphTimeMachine';
@@ -38,6 +40,25 @@ export interface StreamGraphPostsProps {
 }
 
 type HoverCard = { node: NexusGraphUserNode; x: number; y: number };
+
+/** Pulse surface tag on every event this layout emits. */
+const FEED_SURFACE: Surface = 'feed';
+
+/**
+ * The graph layout is a mode inside several stream routes (`/home`, `/search`, ...),
+ * not a route of its own, so it reports a synthetic screen name the SDK's own
+ * page-view tracking could never produce.
+ */
+const FEED_GRAPH_SCREEN = '/feed/graph';
+
+/**
+ * `graph_control_used`: one event with a `control` breakdown, never one event per
+ * control. `control` is the control's `data-cy` suffix verbatim, and `state` is what
+ * the control becomes (omitted for the ones that do not toggle).
+ */
+function recordControl(control: string, state?: 'on' | 'off'): void {
+  pulseEvent(GRAPH_EVENTS.CONTROL_USED, { surface: FEED_SURFACE, control, ...(state ? { state } : {}) });
+}
 
 /**
  * StreamGraphPosts
@@ -81,6 +102,17 @@ export function StreamGraphPosts({
     focusId: useCallback(() => graphFocusId, [graphFocusId]),
     pathIds: useCallback(() => graphPathIds, [graphPathIds]),
   });
+
+  // Mount, not the layout picker: the same arrival happens when a stored layout
+  // preference restores the graph without a click. Ref-guarded, since React 19
+  // StrictMode double-invokes effects in development.
+  const layoutReported = useRef(false);
+  useEffect(() => {
+    if (layoutReported.current) return;
+    layoutReported.current = true;
+    pulseScreen(FEED_GRAPH_SCREEN);
+    pulseEvent(GRAPH_EVENTS.LAYOUT_SELECTED, { surface: FEED_SURFACE });
+  }, []);
 
   const proofUsers = useMemo(() => {
     if (!meId || !graph.selectedNode || graph.selectedNode.kind !== 'user' || graph.selectedNode.id === meId) {
@@ -138,6 +170,7 @@ export function StreamGraphPosts({
     (id: string) => {
       if (id.startsWith('user:')) {
         setHoverCard(null);
+        pulseEvent(GRAPH_EVENTS.RECENTERED, { surface: FEED_SURFACE, via: 'node_click' });
         recenterAt.current = Date.now();
         void recenter(id);
         canvasRef.current?.centerOn(id);
@@ -161,6 +194,7 @@ export function StreamGraphPosts({
   const handleRecenterSelf = useCallback(() => {
     if (!meId) return;
     if (graph.nodes.some((n) => n.id === meId)) {
+      pulseEvent(GRAPH_EVENTS.RECENTERED, { surface: FEED_SURFACE, via: 'self_button' });
       recenterAt.current = Date.now();
       void recenter(meId);
       canvasRef.current?.centerOn(meId);
@@ -229,43 +263,75 @@ export function StreamGraphPosts({
 
       <SocialGraphControls
         className="absolute top-6 right-6 z-10"
-        onZoomIn={() => canvasRef.current?.zoomIn()}
-        onZoomOut={() => canvasRef.current?.zoomOut()}
+        onZoomIn={() => {
+          recordControl('zoom-in');
+          canvasRef.current?.zoomIn();
+        }}
+        onZoomOut={() => {
+          recordControl('zoom-out');
+          canvasRef.current?.zoomOut();
+        }}
         timeMachineOn={timeMachineOn}
         timeMachineAvailable={graph.timeBounds !== null}
-        onToggleTimeMachine={() =>
+        onToggleTimeMachine={() => {
+          recordControl('time-toggle', timeMachineOn ? 'off' : 'on');
           setTimeMachineOn((prev) => {
             if (prev) graph.setTimeCap(null);
             return !prev;
-          })
-        }
+          });
+        }}
         onRecenterSelf={meId ? handleRecenterSelf : undefined}
         isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
+        onToggleFullscreen={() => {
+          recordControl('fullscreen', isFullscreen ? 'off' : 'on');
+          toggleFullscreen();
+        }}
         advancedContent={
           <SocialGraphAdvancedPanel
             declutter={graph.declutter}
-            onToggleDeclutter={graph.toggleDeclutter}
+            onToggleDeclutter={() => {
+              recordControl('declutter', graph.declutter ? 'off' : 'on');
+              graph.toggleDeclutter();
+            }}
             communitiesOn={false}
+            // Communities are an explorer lens; the row is inert here, so there is
+            // no outcome to report
             onToggleCommunities={() => undefined}
             edgeChipsOn={edgeChipsOn}
-            onToggleEdgeChips={toggleEdgeChips}
+            onToggleEdgeChips={() => {
+              recordControl('edge-details', edgeChipsOn ? 'off' : 'on');
+              toggleEdgeChips();
+            }}
             tagHubsOn={tagHubsOn}
-            onToggleTagHubs={toggleTagHubs}
+            onToggleTagHubs={() => {
+              recordControl('tag-hubs', tagHubsOn ? 'off' : 'on');
+              toggleTagHubs();
+            }}
             physicsPaused={physicsPaused}
             onTogglePhysics={() => {
               const next = !physicsPaused;
+              recordControl('physics', next ? 'on' : 'off');
               setPhysicsPaused(next);
               canvasRef.current?.setPaused(next);
             }}
-            onReleasePins={() => canvasRef.current?.releasePins()}
-            onFit={() => canvasRef.current?.fit()}
+            onReleasePins={() => {
+              recordControl('release-pins');
+              canvasRef.current?.releasePins();
+            }}
+            onFit={() => {
+              recordControl('fit');
+              canvasRef.current?.fit();
+            }}
             legend={
               <SocialGraphLegend
                 classCounts={graph.classCounts}
                 hiddenClasses={graph.hiddenClasses}
                 onHoverClass={spotlightClass}
-                onToggleClass={graph.toggleClass}
+                onToggleClass={(cls) => {
+                  // `state` is what the row becomes: toggling a hidden class shows it again
+                  recordControl(`legend-${cls}`, graph.hiddenClasses.has(cls) ? 'on' : 'off');
+                  graph.toggleClass(cls);
+                }}
               />
             }
           />
@@ -277,7 +343,10 @@ export function StreamGraphPosts({
           variant="ghost"
           size="icon"
           className={cn(GRAPH_PILL_CLASS, 'absolute top-6 left-6 z-10')}
-          onClick={() => graph.clearPath()}
+          onClick={() => {
+            recordControl('path-exit');
+            graph.clearPath();
+          }}
           aria-label={t('panel.clearPath')}
           title={t('panel.clearPath')}
           data-cy="graph-path-exit"
@@ -340,7 +409,14 @@ export function StreamGraphPosts({
           size="sm"
           className={cn(GRAPH_PILL_CLASS, 'absolute bottom-6 left-6 w-auto gap-2 px-3.5 text-xs font-bold')}
           disabled={loadingMore}
-          onClick={loadMore}
+          onClick={() => {
+            // The pre-merge total, so the breakdown reads as "grew from N"
+            pulseEvent(GRAPH_EVENTS.STREAM_MERGE_MORE, {
+              surface: FEED_SURFACE,
+              total_nodes: String(graph.rawNodeCount),
+            });
+            loadMore();
+          }}
           data-cy="stream-graph-load-more"
         >
           {loadingMore ? <Loader2 className="size-4 animate-spin" /> : <StickyNote className="size-4" />}

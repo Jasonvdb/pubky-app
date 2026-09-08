@@ -2,6 +2,7 @@ import { PostStreamApplication } from '@/application/stream/posts/post';
 import { UserStreamApplication } from '@/application/stream/users/users';
 import { UserApplication } from '@/application/user/user';
 import { Logger } from '@/libs/logger/logger';
+import { GRAPH_ERROR_EVENTS, pulseGraphWarn } from '@/libs/observability/pulse.graph';
 import type { Pubky } from '@/models/models.types';
 import { buildCompositeId } from '@/models/models.utils';
 import { LocalStreamPostsService } from '@/services/local/stream/posts/posts';
@@ -41,9 +42,11 @@ export class GraphApplication {
    * TTL in one shot. Ghost post nodes get hydrated the same way.
    */
   private static async ingestGraphEntities(graph: NexusGraph, viewerId?: Pubky | null): Promise<void> {
+    // Hoisted so the failure report below can say how much of the payload was
+    // left uncached, which is what makes a backfill failure actionable
+    const userIds: Pubky[] = [];
+    const postIds: string[] = [];
     try {
-      const userIds: Pubky[] = [];
-      const postIds: string[] = [];
       for (const node of graph.nodes) {
         if (node.kind === 'user') userIds.push(node.pubky);
         else if (node.kind === 'post') postIds.push(buildCompositeId({ pubky: node.author_id, id: node.post_id }));
@@ -66,7 +69,14 @@ export class GraphApplication {
       // tags-table miss check internally.
       await UserApplication.getManyTagsOrFetch({ userIds });
     } catch (error) {
+      // Warn, not error: the backfill is a cache warm-up, so losing it degrades
+      // hover and selection surfaces without breaking the canvas itself
       Logger.warn('GraphApplication: failed to ingest graph entities', { error });
+      pulseGraphWarn(error, GRAPH_ERROR_EVENTS.INGEST_FAILED, {
+        node_count: String(graph.nodes.length),
+        user_count: String(userIds.length),
+        post_count: String(postIds.length),
+      });
     }
   }
 }

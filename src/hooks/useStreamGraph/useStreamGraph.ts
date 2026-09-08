@@ -15,6 +15,7 @@ import {
   type VisualGraphNode,
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { Logger } from '@/libs/logger/logger';
+import { GRAPH_ERROR_EVENTS, pulseGraphError, pulseGraphWarn, type Surface } from '@/libs/observability/pulse.graph';
 import type { Pubky } from '@/models/models.types';
 import type { NexusGraph, NexusGraphEdge, NexusGraphNode } from '@/services/nexus/graph/graph.types';
 import { useAuthStore } from '@/stores/auth/auth.store';
@@ -22,6 +23,9 @@ import { type StreamPostInput, streamToGraph, tryParseCompositeId, viewerRelatio
 
 type ViewerRelFlags = Map<string, { following: boolean; followed_by: boolean }>;
 const EMPTY_RELS: ViewerRelFlags = new Map();
+
+/** Pulse surface tag on every event this hook's graph core emits. */
+const FEED_SURFACE: Surface = 'feed';
 
 export type UseStreamGraphResult = {
   nodes: VisualGraphNode[];
@@ -77,6 +81,9 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
   const [focusOverride, setFocusOverride] = useState<string | null>(null);
   const gatherNonce = useRef(0);
   const seededFor = useRef<Pubky | null>(null);
+  // The relationship live query re-runs on every graph mutation, so its failure
+  // is reported once per mount rather than once per re-run
+  const relsFailureReported = useRef(false);
 
   const postKey = postIds.join(',');
   const meNodeId = currentUserPubky ? `user:${currentUserPubky}` : null;
@@ -126,6 +133,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
     deriveSizeRelationships,
     // The feed's posts ARE the content; never thin them to the design cap
     capPostsByTier: false,
+    surface: FEED_SURFACE,
   });
   const { graph, setGraph, expandedIds, expand } = core;
 
@@ -160,6 +168,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
       } catch (err) {
         // Non-fatal: the stream synthesis still renders
         Logger.error('useStreamGraph: failed to seed viewer node', err);
+        pulseGraphWarn(err, GRAPH_ERROR_EVENTS.SEED_VIEWER_FAILED, { surface: FEED_SURFACE });
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -242,7 +251,9 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
           return mergeGraph(prev, synthesized);
         });
       } catch (err) {
+        // The canvas is empty without this: the feed's whole graph comes from here
         Logger.error('useStreamGraph: failed to synthesize stream graph', err);
+        pulseGraphError(err, GRAPH_ERROR_EVENTS.STREAM_SYNTHESIS_FAILED, { surface: FEED_SURFACE });
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -262,7 +273,13 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
       }
       return map;
     } catch (error) {
+      // Degraded, not broken: the graph still renders, with everyone painted
+      // as an extended relationship
       Logger.error('useStreamGraph: failed to query author relationships', { error });
+      if (!relsFailureReported.current) {
+        relsFailureReported.current = true;
+        pulseGraphWarn(error, GRAPH_ERROR_EVENTS.STREAM_RELS_FAILED, { surface: FEED_SURFACE });
+      }
       return EMPTY_RELS;
     }
   }, [pubkyKey]);
