@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
+import { initPulse } from '@/libs/observability/pulse';
 import { getSentryInitBase, shouldEnableSentry } from '@/libs/observability/sentry';
 import {
   getSentryReplaysOnErrorSampleRate,
@@ -22,6 +23,10 @@ if (shouldEnableSentry()) {
     ],
   });
 }
+
+// Product analytics for the graph explorer. Self-gating and a no-op unless a Pulse client key
+// is configured at runtime, which no dev, test or CI environment sets. See docs/pulse.md.
+initPulse();
 
 /**
  * Next.js framework convention export — discovered by name from this module.

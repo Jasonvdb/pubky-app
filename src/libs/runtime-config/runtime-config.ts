@@ -200,6 +200,7 @@ export const getPreludeSdkKey = (): string | undefined => getRuntimeConfig().pre
 export const getPreludeSdkTimeoutMs = (): number => getRuntimeConfig().preludeSdkTimeoutMs;
 export const getPlausibleDomain = (): string | undefined => getRuntimeConfig().plausibleDomain;
 export const getPlausibleScriptUrl = (): string | undefined => getRuntimeConfig().plausibleScriptUrl;
+export const getPulseClientKey = (): string | undefined => getRuntimeConfig().pulseClientKey;
 export const getPreviewImage = (): string => getRuntimeConfig().previewImage;
 export const getSiteName = (): string => getRuntimeConfig().siteName;
 export const getLocale = (): string => getRuntimeConfig().locale;

@@ -31,6 +31,14 @@ For the mock dataset instead: `cargo run -p nexusd -- db mock`, then use the fix
 
 Sign in, switch Home to Following, flip the layout to Graph, hit the time machine's play button and watch the week assemble. Then open `/graph`, double-click a friend, hover people, select a post and reply to it from the panel, and hit "How am I connected?" on a stranger.
 
+## Telemetry
+
+Optional Pubky Pulse instrumentation covers this feature and nothing else in the app. It is off
+unless `PUBKY_RUNTIME_PULSE_CLIENT_KEY` (dev fallback `NEXT_PUBLIC_PULSE_CLIENT_KEY`) is set, and
+both entries stay commented out in `.env.example`, so local dev, Cypress and CI emit nothing.
+Event names, funnel steps, metric slugs, the privacy rules and the never-instrument list live in
+[`pulse.md`](pulse.md); the taxonomy constants live in `src/libs/observability/pulse.graph.ts`.
+
 ## Tests
 
 - Nexus: `cargo nextest run -p nexus-webapi` (needs the mock dataset loaded; 13 graph tests among 508).
