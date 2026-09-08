@@ -2,8 +2,9 @@
 
 Product analytics for the `/graph` explorer and the feed "Graph" layout, via the
 `@synonymdev/pubky-pulse-web` SDK. Scope is deliberately narrow: **only** the graph experiment is
-instrumented. No other page gets hand-written Pulse calls — page views elsewhere stay with
-cookieless Plausible, and error reporting stays with Sentry (see [`sentry.md`](sentry.md)).
+instrumented, plus the app-wide redacted page view that is its funnel denominator. No other page
+gets hand-written Pulse calls — analytics elsewhere stay with cookieless Plausible, and error
+reporting stays with Sentry (see [`sentry.md`](sentry.md)).
 
 ## Off by default
 
@@ -31,8 +32,14 @@ there would turn an analytics typo into an app-wide boot failure.
 
 `initPulse()` is called from `src/components/atoms/PulseInit/PulseInit.tsx` — a `'use client'`
 component that renders `null` and is mounted once in `src/app/layout.tsx`, so it runs on every
-route. The SDK's automatic page-view tracking is the denominator for the graph funnels, so this
-must never become graph-page-only.
+route. Page views are the denominator for the graph funnels, so this must never become
+graph-page-only.
+
+The same component reports those page views. The SDK's own `trackPageViews` is **off**: it sends
+`location.pathname` verbatim on every History API navigation, and this app's routes carry
+identifiers (`/profile/{pubky}`, `/post/{author}/{postId}`, `/collections/{userId}/{postId}`,
+`/feed/{id}`, `/invite/{inviteCode}`). Instead `PulseInit` tracks `usePathname()` and reports it
+through `pulseScreen()` with every dynamic segment replaced — see §Privacy.
 
 **It cannot live in `src/instrumentation-client.ts`.** `next/dist/client/app-next.js` requires that
 module at its own top level, _before_ it calls `appBootstrap()` — and `appBootstrap` is what runs
@@ -71,11 +78,25 @@ Pubky App is decentralized social, and a pubky is a network-wide public identifi
   (`user:<pubky>`, `post:<author>:<id>`, `tag:<label>`) into any attribute.**
 - Attributes carry counts, kinds, durations and enums only. When an attribute would naturally be
   an id, send its kind instead (`kind: 'user'`) or a count.
-- The `_http_url` attribute is derived, not copied: `pulse.graph.ts` reduces
-  `error.context.endpoint` to its path and replaces every identifying segment, so
-  `https://nexus.pubky.app/v0/graph/user/user:<pubky>?depth=1` is reported as
-  `/v0/graph/user/user:*`. Origin and query string are dropped (the origin can be a
-  `_pubky.<pubky>` host).
+- **Every path is redacted by route position, never by the shape of the value.**
+  `redactPathSegments()` in `pulse.ts` is the single implementation: the caller says which
+  vocabulary is legal at which segment index, and everything else becomes `*`. Shape is not a
+  safe discriminator — `graphApi` runs ids through `encodeURIComponent` (so `post:<author>:<id>`
+  arrives as `post%3A<author>%3A<id>` with no `:` to split on), and a tag label is arbitrary
+  user-authored text that can look exactly like a route word.
+- The `_http_url` attribute is derived, not copied: `pulse.graph.ts` reduces the endpoint to its
+  path and keeps only the fixed `/v0/graph/{kind}` prefix, so
+  `https://nexus.pubky.app/v0/graph/user/<pubky>?depth=1` is reported as `/v0/graph/user/*`,
+  `/v0/graph/tag/<label>` as `/v0/graph/tag/*`, and `/v0/graph/path/<from>/<to>` as
+  `/v0/graph/path/*/*`. Origin and query string are dropped (the origin can be a
+  `_pubky.<pubky>` host). Any non-graph endpoint that reaches the bridge falls back to a bare
+  pubky sweep. The endpoint is read from `context.endpoint` or `context.url` — `safeFetch` files
+  it under the second on its network and abort paths.
+- The screen name is derived the same way, against the static segments declared in
+  `src/app/routes.ts`: a segment nobody declared is an id, so `/profile/<pubky>` is reported as
+  `/profile/*`, `/collections/<userId>/<postId>` as `/collections/*/*`, and `/invite/<code>` as
+  `/invite/*`. Over-redacting an undeclared static route costs fidelity; under-redacting ships an
+  identifier.
 
 This app is deliberately cookieless Plausible plus `sendDefaultPii: false` Sentry. Pulse must not
 regress that.
@@ -101,9 +122,9 @@ All product events carry `surface: 'explorer' | 'feed'`.
 | `graph_auto_decluttered`  | `edge_count` — **warn level**                                                                                          |
 
 `graph_control_used` is one event with an attribute breakdown, not one event per control:
-`zoom-in`, `zoom-out`, `fullscreen`, `time-toggle`, `time-play`, `advanced`, `declutter`,
-`communities`, `edge-details`, `tag-hubs`, `physics`, `fit`, `release-pins`, `path-exit`, and
-`legend-<class>` for legend rows.
+`zoom-in`, `zoom-out`, `fullscreen`, `time-toggle`, `declutter`, `communities`, `edge-details`,
+`tag-hubs`, `physics`, `fit`, `release-pins`, `path-exit`, and `legend-<class>` for legend rows.
+That list is exhaustive — it is every `recordControl(...)` call site.
 
 ### Funnel `graph-explore`
 
@@ -130,6 +151,11 @@ level, for degradations that leave a usable graph — both merge the `AppError` 
 (`_http_url`, `_http_status`, `_http_method`, `error_category`, `error_code`, `error_operation`)
 into the caller's attributes. `_http_status` is omitted when the request never got a response,
 which is itself the signal that it was a network failure.
+
+For a thrown value that is **not** an `AppError`, `pulseGraphError` keeps its identity for free
+(the SDK receives the value itself). `pulseGraphWarn` takes only a name and attributes, so it
+sends `error_type` plus, for an `Error`, `error_message` — swept for bare pubkys, because a
+thrown message can quote a URL.
 
 `_`-prefixed attribute keys are SDK-reserved; those three `_http_*` are the supported ones. Do not
 invent new `_` keys — use plain names such as `error_category`.
@@ -165,13 +191,17 @@ These produce noise, not signal, and are deliberately left silent:
 - `Pulse.configure()` throws on invalid values. `initPulse()` catches that into `Logger.warn`
   (never an `Err.*` factory — those file Sentry issues, and a telemetry misconfiguration must not)
   and leaves the module permanently inert.
-- Tests need no `vi.mock`: the gate is false under `VITEST` and `NODE_ENV=test`.
+- Feature tests need no `vi.mock`: the gate is false under `VITEST` and `NODE_ENV=test`. The
+  attribute builders are therefore never reached by an ordinary suite, which is how a redaction
+  bug can ship green — `pulse.test.ts` mocks the SDK and drives `initPulse()` to a configured
+  state so it can assert on what the SDK actually received.
 
 ## Files
 
 - `src/components/atoms/PulseInit/PulseInit.tsx` — the single `initPulse()` call, mounted in
-  `src/app/layout.tsx`
-- `src/libs/observability/pulse.ts` — gate, init, and the wrapped helper surface
+  `src/app/layout.tsx`, plus app-wide screen tracking (`toSafeScreenName`)
+- `src/libs/observability/pulse.ts` — gate, init, the wrapped helper surface, and the shared
+  `redactPathSegments()`
 - `src/libs/observability/pulse.graph.ts` — graph taxonomy + `AppError` bridge
 - `src/libs/observability/pulse.test.ts` — gate and attribute-privacy coverage
 - `src/libs/runtime-config/runtime-config.schema.ts` — the `pulseClientKey` field and its two env

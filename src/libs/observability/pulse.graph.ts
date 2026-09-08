@@ -1,5 +1,5 @@
 import { isAppError } from '@/libs/error/error';
-import { pulseCaptureError, pulseWarn } from '@/libs/observability/pulse';
+import { pulseCaptureError, pulseWarn, REDACTED_PATH_SEGMENT, redactPathSegments } from '@/libs/observability/pulse';
 import { RAW_PUBKY_PATTERN } from '@/libs/observability/sentry.constants';
 
 /**
@@ -72,25 +72,30 @@ export const GRAPH_ERROR_EVENTS = {
   STREAM_RELS_FAILED: 'graph_stream_rels_failed',
 } as const;
 
-/** Stand-in for any identifying path segment. Short so the route shape stays readable. */
-const REDACTED_SEGMENT = '*';
+/** Prefix shared by every URL `graphApi` builds. Anything else takes the fallback sweep. */
+const GRAPH_PATH_PREFIX = '/v0/graph/';
 
 /**
- * Strip identity out of one URL path segment.
+ * Positional vocabulary for a nexus graph request path — one entry per path segment.
  *
- * Nexus graph ids are prefixed (`user:<pubky>`, `post:<author>:<id>`, `tag:<label>`), so the
- * kind before the first colon is the only part worth keeping — everything after it is a
- * pubky, a post id or a user-authored tag label, all of which §Privacy forbids. Bare pubky
- * segments (other nexus routes) are matched by the shared Sentry pattern.
+ * `graphApi` builds exactly two shapes, `/v0/graph/{kind}/{id}` and
+ * `/v0/graph/path/{from}/{to}`, so the first three segments are a fixed vocabulary (`kind`
+ * is already a safe attribute elsewhere) and everything after them is an id. Redacting by
+ * POSITION rather than by segment shape is what makes this safe: `graphApi` runs every id
+ * through `encodeURIComponent`, so a `post:<author>:<id>` node id arrives as
+ * `post%3A<author>%3A<id>` with no `:` left to split on, and a tag label is arbitrary
+ * user-authored text that can look exactly like a route word.
  */
-function redactPathSegment(segment: string): string {
-  const separator = segment.indexOf(':');
-  if (separator > 0) return `${segment.slice(0, separator)}:${REDACTED_SEGMENT}`;
-  return segment.replace(RAW_PUBKY_PATTERN, REDACTED_SEGMENT);
-}
+const GRAPH_PATH_VOCABULARY: readonly ReadonlySet<string>[] = [
+  new Set(['v0']),
+  new Set(['graph']),
+  new Set(['user', 'post', 'tag', 'path']),
+];
 
 /**
- * The `_http_url` value: request path only, with every identifying segment redacted.
+ * The `_http_url` value: request path only, with every identifying segment redacted, so
+ * `/v0/graph/tag/<label>` reports as `/v0/graph/tag/*` and both ids of
+ * `/v0/graph/path/<from>/<to>` are replaced the same way.
  *
  * The origin and query string are dropped deliberately — the origin can be a
  * `_pubky.<pubky>` host and the query carries pagination noise, and neither adds anything to
@@ -107,14 +112,23 @@ function toSafeHttpPath(endpoint: unknown): string | undefined {
     path = endpoint.split('?')[0];
   }
 
-  return path.split('/').map(redactPathSegment).join('/');
+  if (path.startsWith(GRAPH_PATH_PREFIX)) {
+    return redactPathSegments(path, (segment, index) => GRAPH_PATH_VOCABULARY[index]?.has(segment) ?? false);
+  }
+
+  // Belt and braces for any non-graph endpoint that reaches this bridge: a bare pubky is the
+  // one identifier recognisable without knowing the route it sits in.
+  return path.replace(RAW_PUBKY_PATTERN, REDACTED_PATH_SEGMENT);
 }
 
 /**
  * Translate an `AppError` into Pulse attributes.
  *
  * `fetchNexus` throws `httpResponseToError(...)`, an `AppError` whose `context` carries
- * `endpoint` and `statusCode`. Both are typed `unknown`, so they are narrowed before use.
+ * `endpoint` and `statusCode`. Its network and abort paths come from `safeFetch`, which
+ * files the same value under `url` instead — read both, or the HTTP breakdown goes missing
+ * exactly when the request never reached the server. All of these are typed `unknown`, so
+ * they are narrowed before use.
  *
  * `_`-prefixed keys are SDK-reserved; `_http_url` / `_http_status` / `_http_method` are the
  * three supported ones, and no others may be invented. `_http_status` is omitted when the
@@ -128,7 +142,7 @@ function toErrorAttributes(error: unknown): Record<string, string> {
   if (error.code) attributes.error_code = String(error.code);
   if (error.operation) attributes.error_operation = error.operation;
 
-  const httpPath = toSafeHttpPath(error.context?.endpoint);
+  const httpPath = toSafeHttpPath(error.context?.endpoint ?? error.context?.url);
   if (httpPath) {
     attributes._http_url = httpPath;
     // Every graph endpoint is a GET; there is no other verb on this surface.
@@ -152,10 +166,33 @@ export function pulseGraphError(err: unknown, name: string, attrs?: Record<strin
 }
 
 /**
+ * Identity for a thrown value that is not an `AppError`, so a warn is still triageable.
+ *
+ * `pulseGraphError` keeps that identity for free — `pulseCaptureError` hands the thrown value
+ * itself to the SDK. `pulseWarn` takes only a name and attributes, so without this a plain
+ * `throw` inside a degradation path arrives as a bare event name.
+ *
+ * The message is swept for bare pubkys for the same reason `_http_url` is: a thrown message
+ * can quote a URL, and §Privacy forbids shipping the identifier inside it. This is also why
+ * the message is derived here rather than through `getErrorMessage`: `@/libs/error/error.utils`
+ * re-exports the `Err.*` factories, which would pull the Sentry SDK into every server bundle
+ * that touches the graph (see the module docstring).
+ */
+function toThrownValueAttributes(error: unknown): Record<string, string> {
+  if (!(error instanceof Error)) return { error_type: typeof error };
+
+  return {
+    error_type: error.name,
+    error_message: error.message.replace(RAW_PUBKY_PATTERN, REDACTED_PATH_SEGMENT),
+  };
+}
+
+/**
  * Same enrichment at warn level, for degradations rather than failures — a failed Dexie
  * backfill or a missing relationship batch leaves a usable graph, so it must not raise an
  * error-rate alarm.
  */
 export function pulseGraphWarn(err: unknown, name: string, attrs?: Record<string, string>): void {
-  pulseWarn(name, { ...toErrorAttributes(err), ...attrs });
+  const breakdown = isAppError(err) ? toErrorAttributes(err) : toThrownValueAttributes(err);
+  pulseWarn(name, { ...breakdown, ...attrs });
 }

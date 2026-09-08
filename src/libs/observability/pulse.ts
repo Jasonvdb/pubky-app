@@ -24,6 +24,37 @@ const PULSE_BUNDLE_ID = 'graph.pubky.app';
 /** Every Pulse browser key carries this prefix; anything else is a misconfiguration. */
 const CLIENT_KEY_PREFIX = 'pulse_client_';
 
+/** Stand-in for any identifying path segment. Short so the route shape stays readable. */
+export const REDACTED_PATH_SEGMENT = '*';
+
+/**
+ * Rewrite a URL path, keeping only the segments the caller vouches for and replacing every
+ * other one with `*`.
+ *
+ * The one redaction shared by the two places a path becomes an attribute: the screen name
+ * reported for the current route (`PulseInit`) and the `_http_url` of a failed request
+ * (`pulse.graph.ts`). Both decide by POSITION — the caller says which vocabulary is legal
+ * where — never by the shape of the value. Shape is not a safe discriminator: ids are
+ * `encodeURIComponent`-escaped on the way into a URL, and a tag label is arbitrary
+ * user-authored text that can look exactly like a route word.
+ *
+ * `index` counts only non-empty segments, so `/v0/graph/tag/<label>` sees `0..3`; empty
+ * segments (the leading one, and any trailing slash) are preserved verbatim.
+ */
+export function redactPathSegments(path: string, isSafeSegment: (segment: string, index: number) => boolean): string {
+  let index = 0;
+
+  return path
+    .split('/')
+    .map((segment) => {
+      if (segment === '') return segment;
+      const safe = isSafeSegment(segment, index);
+      index += 1;
+      return safe ? segment : REDACTED_PATH_SEGMENT;
+    })
+    .join('/');
+}
+
 /**
  * True only after `Pulse.configure()` returned without throwing.
  *
@@ -121,13 +152,17 @@ export function shouldEnablePulse(): boolean {
  *   production console.
  * - `captureUnhandled: false` — app-wide `error` / `unhandledrejection` listeners would
  *   duplicate what Sentry's `globalHandlers` integration already reports.
+ * - `trackPageViews: false` — the SDK's own page-view tracking sends `location.pathname`
+ *   verbatim on every History API navigation, and this app's routes carry pubkys, post ids
+ *   and invite codes (`/profile/<pubky>`, `/invite/<code>`). Page views are still tracked
+ *   app-wide, but through `PulseInit`, which redacts the pathname first — the funnel
+ *   denominator is kept, the identifiers are not.
  *
  * Everything else is deliberately left at its SDK default: `endpoint` (hosted ingest),
- * `isDev` (resolves localhost / 127.0.0.1 / file: correctly), `trackPageViews` (true — the
- * denominator for every graph funnel), `networkTracking` (false — the graph fires many
- * fetches and per-request events are pure noise), and `propagateSessionTo` /
- * `supportedLanguages` (nexus is a separate Rust service, and the language list belongs to
- * the server-side app record).
+ * `isDev` (resolves localhost / 127.0.0.1 / file: correctly), `networkTracking` (false —
+ * the graph fires many fetches and per-request events are pure noise), and
+ * `propagateSessionTo` / `supportedLanguages` (nexus is a separate Rust service, and the
+ * language list belongs to the server-side app record).
  */
 export function initPulse(): void {
   if (configured || configureFailed) return;
@@ -140,6 +175,7 @@ export function initPulse(): void {
       appVersion: Env.NEXT_PUBLIC_APP_VERSION,
       consoleLogging: false,
       captureUnhandled: false,
+      trackPageViews: false,
     });
   } catch (error) {
     // `Pulse.configure()` throws on invalid values. Report it as a warning, NOT through an
@@ -190,7 +226,11 @@ export function pulseStep(step: string, attrs?: Record<string, string>): void {
   safely(() => Pulse.step(step, attrs));
 }
 
-/** Report a screen the SDK's own page-view tracking cannot see (a modal, a canvas mode). */
+/**
+ * Report a screen. The SDK's own page-view tracking is off (it would ship raw pathnames), so
+ * every screen comes from here: `PulseInit` for the redacted route, feature code for a screen
+ * a route cannot express (a canvas mode, a modal).
+ */
 export function pulseScreen(name: string): void {
   if (!configured) return;
   safely(() => Pulse.trackScreen(name));
