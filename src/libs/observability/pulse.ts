@@ -6,9 +6,9 @@ import { getPulseClientKey, getTestnet } from '@/libs/runtime-config/runtime-con
 /**
  * Single source of truth for Pubky Pulse (product analytics) in the browser.
  *
- * Containment rule — do NOT import `@synonymdev/pubky-pulse-web` outside of:
- * - `src/instrumentation-client.ts` (the one place that calls `initPulse()`)
- * - this file (the capture funnel every feature call goes through)
+ * Containment rule — do NOT import `@synonymdev/pubky-pulse-web` outside this file (the capture
+ * funnel every feature call goes through). `initPulse()` is called from exactly one place:
+ * `src/components/atoms/PulseInit/PulseInit.tsx`, mounted in the root layout.
  *
  * Feature code imports the taxonomy wrappers in `pulse.graph.ts`, or the helpers below.
  * That keeps the SDK swappable and keeps the "disabled" path in exactly one place.
@@ -32,6 +32,14 @@ const CLIENT_KEY_PREFIX = 'pulse_client_';
  * permanent no-op for the life of the page rather than a repeated failed call.
  */
 let configured = false;
+
+/**
+ * True once `Pulse.configure()` threw. Together with `configured` it makes `configure()`
+ * at-most-once for the life of the page, while leaving `initPulse()` itself safe to call again:
+ * a closed gate latches nothing, because the gate can be closed merely because
+ * `window.__PUBKY_CONFIG__` has not been injected yet when the caller runs.
+ */
+let configureFailed = false;
 
 /**
  * A tracked operation as call sites see it: start it, then finish it exactly once.
@@ -96,12 +104,17 @@ export function shouldEnablePulse(): boolean {
 }
 
 /**
- * Configure the SDK. The ONLY caller of `Pulse.configure()`, and called from exactly one
- * place (`src/instrumentation-client.ts`).
+ * Configure the SDK. The ONLY caller of `Pulse.configure()`, called from
+ * `src/components/atoms/PulseInit/PulseInit.tsx`.
  *
  * Never call `configure()` at module scope: `pulse.graph.ts` is imported by Application-layer
  * code that also runs on the server, and an accidental server-side import of this module must
  * not be able to start a browser SDK.
+ *
+ * Safe to call repeatedly. A closed gate is not latched — `shouldEnablePulse()` also returns
+ * false when the runtime config simply is not resolvable yet — so an early caller can never
+ * disable Pulse for the life of the page. `Pulse.configure()` still runs at most once: the
+ * `configured` / `configureFailed` pair short-circuits every later call.
  *
  * Non-default options, and why:
  * - `consoleLogging: false` — the SDK default (true) would mirror every event to the
@@ -117,7 +130,7 @@ export function shouldEnablePulse(): boolean {
  * the server-side app record).
  */
 export function initPulse(): void {
-  if (configured) return;
+  if (configured || configureFailed) return;
   if (!shouldEnablePulse()) return;
 
   try {
@@ -131,7 +144,9 @@ export function initPulse(): void {
   } catch (error) {
     // `Pulse.configure()` throws on invalid values. Report it as a warning, NOT through an
     // `Err.*` factory: those route to Sentry, and a telemetry misconfiguration must not file
-    // a production issue. `configured` stays false, so every helper below stays a no-op.
+    // a production issue. `configured` stays false, so every helper below stays a no-op, and
+    // `configureFailed` stops a later `initPulse()` from re-running a call that throws again.
+    configureFailed = true;
     Logger.warn('Pulse configuration failed; analytics disabled for this session', error);
     return;
   }

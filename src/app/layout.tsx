@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Viewport } from 'next';
 import { getLocale, getMessages } from 'next-intl/server';
+import { PulseInit } from '@/atoms/PulseInit/PulseInit';
 import { TooltipProvider } from '@/atoms/Tooltip/Tooltip';
 import { TOOLTIP_DELAY_MS } from '@/config/ui';
 import { RootContainer } from '@/molecules/ContainerRoot/ContainerRoot';
@@ -41,6 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <RootContainer locale={locale}>
+      <PulseInit />
       <IntlProvider locale={locale} messages={messages}>
         <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
           <GlobalErrorHandlerProvider>

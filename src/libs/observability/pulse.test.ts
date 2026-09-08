@@ -161,6 +161,89 @@ describe('helpers before initPulse()', () => {
   });
 });
 
+describe('initPulse', () => {
+  /**
+   * Import a fresh ./pulse with the SDK mocked (so `Pulse.configure()` calls are observable and
+   * no real SDK boots) and Env mocked to a deployed shape.
+   *
+   * `NODE_ENV` / `VITEST` are stubbed on `process.env` too: runtime-config reads those directly,
+   * and only in "required" mode does a missing `window.__PUBKY_CONFIG__` throw instead of quietly
+   * falling back to `NEXT_PUBLIC_*` — the throw is exactly the browser condition under test.
+   */
+  async function withMockedSdk(
+    configure: () => void,
+    run: (mod: typeof import('./pulse')) => void | Promise<void>,
+  ): Promise<void> {
+    vi.resetModules();
+    vi.doMock('@synonymdev/pubky-pulse-web', () => ({ Pulse: { configure } }));
+    vi.doMock('@/libs/env/env', () => ({
+      Env: {
+        NODE_ENV: 'production',
+        VITEST: undefined,
+        NEXT_PUBLIC_APP_VERSION: 'test',
+      },
+    }));
+    vi.doMock('@/libs/logger/logger', () => ({ Logger: { warn: vi.fn() } }));
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('VITEST', '');
+
+    try {
+      const mod = await import('./pulse');
+      await run(mod);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.doUnmock('@/libs/logger/logger');
+      vi.doUnmock('@/libs/env/env');
+      vi.doUnmock('@synonymdev/pubky-pulse-web');
+      vi.resetModules();
+    }
+  }
+
+  it('stays initializable after a call made before window.__PUBKY_CONFIG__ was injected', async () => {
+    const configure = vi.fn();
+
+    await withMockedSdk(configure, ({ initPulse, isPulseActive }) => {
+      // The runtime config is published by a beforeInteractive script that has not run yet, so
+      // the gate cannot resolve it. That must not latch "disabled" for the life of the page.
+      initPulse();
+      expect(configure).not.toHaveBeenCalled();
+      expect(isPulseActive()).toBe(false);
+
+      const removeRuntimeConfig = injectRuntimeConfig();
+      try {
+        initPulse();
+        expect(configure).toHaveBeenCalledTimes(1);
+        expect(isPulseActive()).toBe(true);
+
+        // Idempotent: a remount or a StrictMode double-invoke reconfigures nothing.
+        initPulse();
+        expect(configure).toHaveBeenCalledTimes(1);
+      } finally {
+        removeRuntimeConfig();
+      }
+    });
+  });
+
+  it('never retries Pulse.configure() once it has thrown', async () => {
+    const configure = vi.fn(() => {
+      throw new Error('invalid Pulse configuration');
+    });
+
+    await withMockedSdk(configure, ({ initPulse, isPulseActive }) => {
+      const removeRuntimeConfig = injectRuntimeConfig();
+      try {
+        expect(() => initPulse()).not.toThrow();
+        expect(() => initPulse()).not.toThrow();
+
+        expect(configure).toHaveBeenCalledTimes(1);
+        expect(isPulseActive()).toBe(false);
+      } finally {
+        removeRuntimeConfig();
+      }
+    });
+  });
+});
+
 describe('pulseGraphError attributes', () => {
   /**
    * The bridge only builds attributes; capture is a no-op under Vitest because Pulse is

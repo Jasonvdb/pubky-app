@@ -1,5 +1,4 @@
 import * as Sentry from '@sentry/nextjs';
-import { initPulse } from '@/libs/observability/pulse';
 import { getSentryInitBase, shouldEnableSentry } from '@/libs/observability/sentry';
 import {
   getSentryReplaysOnErrorSampleRate,
@@ -24,9 +23,12 @@ if (shouldEnableSentry()) {
   });
 }
 
-// Product analytics for the graph explorer. Self-gating and a no-op unless a Pulse client key
-// is configured at runtime, which no dev, test or CI environment sets. See docs/pulse.md.
-initPulse();
+// Pulse is deliberately NOT initialized here. `next/dist/client/app-next.js` requires this
+// module at its own top level, BEFORE it calls `appBootstrap()` — and `appBootstrap` is what runs
+// the `beforeInteractive` script queue that assigns `window.__PUBKY_CONFIG__`. At this point the
+// runtime config does not exist yet, so the Pulse gate would read as "disabled" and no event
+// would ever be sent. `initPulse()` therefore runs from `@/atoms/PulseInit/PulseInit`, which the
+// root layout mounts and which is evaluated during hydration. See docs/pulse.md.
 
 /**
  * Next.js framework convention export — discovered by name from this module.

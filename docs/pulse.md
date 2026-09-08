@@ -27,13 +27,29 @@ config schema deliberately does not validate the key's format, because
 `runtimeConfigValueSchema.parse()` backs every consumer of `window.__PUBKY_CONFIG__` and a throw
 there would turn an analytics typo into an app-wide boot failure.
 
+## Where init happens (do not move it)
+
+`initPulse()` is called from `src/components/atoms/PulseInit/PulseInit.tsx` — a `'use client'`
+component that renders `null` and is mounted once in `src/app/layout.tsx`, so it runs on every
+route. The SDK's automatic page-view tracking is the denominator for the graph funnels, so this
+must never become graph-page-only.
+
+**It cannot live in `src/instrumentation-client.ts`.** `next/dist/client/app-next.js` requires that
+module at its own top level, _before_ it calls `appBootstrap()` — and `appBootstrap` is what runs
+`loadScriptsInSequence(self.__next_s, …)`, the queue that executes ContainerRoot's
+`next/script strategy="beforeInteractive"` tag and assigns `window.__PUBKY_CONFIG__`. Initializing
+there means `shouldEnablePulse()` cannot resolve the runtime config, its `catch` returns false, and
+nothing is ever sent. A client component module is evaluated during hydration, which happens inside
+`appBootstrap` after that queue has run, so the runtime config is reliably present.
+
+`initPulse()` is therefore idempotent and retry-safe: a closed gate latches nothing (it may be
+closed only because the config was not resolvable yet), while `Pulse.configure()` still runs at most
+once per page — after it returns, or after it throws, later calls short-circuit.
+
 ## Containment rule
 
-> Do **not** import `@synonymdev/pubky-pulse-web` outside `src/libs/observability/pulse.ts` and
-> `src/instrumentation-client.ts`.
+> Do **not** import `@synonymdev/pubky-pulse-web` outside `src/libs/observability/pulse.ts`.
 
-- `src/instrumentation-client.ts` — the only caller of `initPulse()`, one call after the Sentry
-  block.
 - `src/libs/observability/pulse.ts` — the only caller of `Pulse.configure()` and the only module
   that touches the SDK surface. Every helper is a no-op until `configure()` has returned without
   throwing, and every SDK call is wrapped so a telemetry failure can never escape into the
@@ -153,7 +169,8 @@ These produce noise, not signal, and are deliberately left silent:
 
 ## Files
 
-- `src/instrumentation-client.ts` — the single `initPulse()` call
+- `src/components/atoms/PulseInit/PulseInit.tsx` — the single `initPulse()` call, mounted in
+  `src/app/layout.tsx`
 - `src/libs/observability/pulse.ts` — gate, init, and the wrapped helper surface
 - `src/libs/observability/pulse.graph.ts` — graph taxonomy + `AppError` bridge
 - `src/libs/observability/pulse.test.ts` — gate and attribute-privacy coverage
