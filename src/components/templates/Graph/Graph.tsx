@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { RotateCcw, Users, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -15,9 +15,16 @@ import { useFullscreenToggle } from '@/hooks/useFullscreenToggle/useFullscreenTo
 import { useGraphDebug } from '@/hooks/useGraphDebug/useGraphDebug';
 import { useIsMobile } from '@/hooks/useIsMobile/useIsMobile';
 import { useSocialGraph } from '@/hooks/useSocialGraph/useSocialGraph';
-import type { HideableClass, TrailEntry } from '@/hooks/useSocialGraph/useSocialGraph.types';
+import {
+  EXPLORER_SURFACE,
+  type GraphExpandSource,
+  type HideableClass,
+  type TrailEntry,
+} from '@/hooks/useSocialGraph/useSocialGraph.types';
 import { edgeKey, type SocialGraphVisualEdge, socialProof } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useTrackedPoint } from '@/hooks/useTrackedPoint/useTrackedPoint';
+import { pulseEvent, pulseScreen, pulseStep } from '@/libs/observability/pulse';
+import { GRAPH_EVENTS, GRAPH_FUNNEL_STEPS } from '@/libs/observability/pulse.graph';
 import { cn } from '@/libs/utils/utils';
 import type { Pubky } from '@/models/models.types';
 import { CanvasAnchoredPopover } from '@/molecules/CanvasAnchoredPopover/CanvasAnchoredPopover';
@@ -37,6 +44,39 @@ import { useGraphStore } from '@/stores/graph/graph.store';
 
 type TagEdgePopover = { labels: string[]; sourceId: string; targetId: string; x: number; y: number };
 type HoverCard = { node: NexusGraphUserNode; x: number; y: number };
+
+/**
+ * Fire a funnel step at most once per mount. React 19 StrictMode double-invokes
+ * effects in development, and a re-fired step blurs the drop-off the funnel exists
+ * to measure. Module-level so it never lands in a hook dependency array.
+ */
+function fireOnce(fired: MutableRefObject<boolean>, step: string): void {
+  if (fired.current) return;
+  fired.current = true;
+  pulseStep(step);
+}
+
+/**
+ * `graph_control_used`: one event with a `control` breakdown, never one event per
+ * control. `control` is the control's `data-cy` suffix verbatim, and `state` is what
+ * the control becomes (omitted for the ones that do not toggle).
+ */
+function recordControl(control: string, state?: 'on' | 'off'): void {
+  pulseEvent(GRAPH_EVENTS.CONTROL_USED, { surface: EXPLORER_SURFACE, control, ...(state ? { state } : {}) });
+}
+
+/** `graph_search_pick`. The pick's own expand marks the funnel step that follows it. */
+function recordSearchPick(kind: 'user' | 'tag', origin: 'header' | 'inline'): void {
+  pulseEvent(GRAPH_EVENTS.SEARCH_PICK, { surface: EXPLORER_SURFACE, kind, origin });
+}
+
+/**
+ * The funnel's first-interaction step. Every expand, recenter and search pick
+ * marks it, and only the first of them reaches Pulse.
+ */
+function markInteracted(interacted: MutableRefObject<boolean>): void {
+  fireOnce(interacted, GRAPH_FUNNEL_STEPS.INTERACTED);
+}
 
 /**
  * Graph
@@ -79,6 +119,29 @@ export function Graph() {
     if (centerPubky) load(centerPubky);
   }, [centerPubky, load]);
 
+  // Funnel guards: each step is once per mount, and the refs are what make that hold
+  const openedStep = useRef(false);
+  const interactedStep = useRef(false);
+  const tracedStep = useRef(false);
+
+  useEffect(() => {
+    if (openedStep.current) return;
+    openedStep.current = true;
+    pulseScreen(APP_ROUTES.GRAPH);
+    pulseEvent(GRAPH_EVENTS.OPENED, {
+      surface: EXPLORER_SURFACE,
+      // How the page was reached; never who it was reached for
+      entry: searchParams.get('user') ? 'deeplink' : currentUserPubky ? 'self' : 'anonymous',
+      is_mobile: String(isMobile),
+    });
+    pulseStep(GRAPH_FUNNEL_STEPS.OPENED);
+  }, [searchParams, currentUserPubky, isMobile]);
+
+  // A successful trace is only observable from here as a committed path
+  useEffect(() => {
+    if (graph.pathIds && graph.pathIds.length > 0) fireOnce(tracedStep, GRAPH_FUNNEL_STEPS.TRACED);
+  }, [graph.pathIds]);
+
   // A search pick focuses, expands, and flies the camera onto the node. The
   // fly is delayed so the merge lands and the physics assigns coordinates
   // (centerOn no-ops on nodes without a position yet).
@@ -96,21 +159,23 @@ export function Graph() {
 
   const { addUser, addTag, expand } = graph;
   const handlePickUser = useCallback(
-    async (pubky: Pubky) => {
+    async (pubky: Pubky, source?: GraphExpandSource) => {
       const nodeId = `user:${pubky}`;
+      markInteracted(interactedStep);
       await addUser(pubky);
       // Expands nodes that were already on the canvas; freshly added centers
       // arrive with their neighborhood and no-op here
-      await expand(nodeId);
+      await expand(nodeId, undefined, source);
       flyToNode(nodeId);
     },
     [addUser, expand, flyToNode],
   );
   const handlePickTag = useCallback(
-    async (label: string) => {
+    async (label: string, source: GraphExpandSource) => {
       const nodeId = `tag:${label}`;
+      markInteracted(interactedStep);
       await addTag(label);
-      await expand(nodeId);
+      await expand(nodeId, undefined, source);
       flyToNode(nodeId);
     },
     [addTag, expand, flyToNode],
@@ -123,8 +188,13 @@ export function Graph() {
   const searchTarget = useGraphStore((state) => state.searchTarget);
   useEffect(() => {
     if (!searchTarget) return;
-    if (searchTarget.kind === 'user') void handlePickUser(searchTarget.pubky as Pubky);
-    else void handlePickTag(searchTarget.label);
+    if (searchTarget.kind === 'user') {
+      recordSearchPick('user', 'header');
+      void handlePickUser(searchTarget.pubky as Pubky, 'search_pick');
+    } else {
+      recordSearchPick('tag', 'header');
+      void handlePickTag(searchTarget.label, 'search_pick');
+    }
     useGraphStore.getState().clearSearchTarget();
   }, [searchTarget, handlePickUser, handlePickTag]);
 
@@ -255,18 +325,23 @@ export function Graph() {
       if (id.startsWith('user:')) {
         setHoverCard(null);
         if (isMobile && graph.focusId === id) {
+          pulseEvent(GRAPH_EVENTS.NODE_INSPECTED, { surface: EXPLORER_SURFACE, kind: 'user' });
           graphSelect(id);
           return;
         }
+        pulseEvent(GRAPH_EVENTS.RECENTERED, { surface: EXPLORER_SURFACE, via: 'node_click' });
+        markInteracted(interactedStep);
         void recenter(id);
         canvasRef.current?.centerOn(id);
         return;
       }
       if (id.startsWith('ptag:')) {
         const label = id.split(':').slice(2).join(':');
-        if (label) void handlePickTag(label);
+        if (label) void handlePickTag(label, 'tag_chip');
         return;
       }
+      // The prefix is the node's kind; the rest of the id identifies a person or a tag
+      pulseEvent(GRAPH_EVENTS.NODE_INSPECTED, { surface: EXPLORER_SURFACE, kind: id.split(':')[0] });
       graphSelect(id);
     },
     [recenter, graphSelect, handlePickTag, isMobile, graph.focusId],
@@ -275,6 +350,8 @@ export function Graph() {
   const handleRecenterSelf = useCallback(() => {
     if (!currentUserPubky) return;
     const nodeId = `user:${currentUserPubky}`;
+    pulseEvent(GRAPH_EVENTS.RECENTERED, { surface: EXPLORER_SURFACE, via: 'self_button' });
+    markInteracted(interactedStep);
     if (graph.nodes.some((n) => n.id === nodeId)) {
       void recenter(nodeId);
       canvasRef.current?.centerOn(nodeId);
@@ -286,7 +363,7 @@ export function Graph() {
   const handleTraceConnection = useCallback(
     (pubky: string) => {
       setHoverCard(null);
-      void graph.tracePath(pubky as Pubky);
+      void graph.tracePath(pubky as Pubky, 'hover_card');
     },
     [graph],
   );
@@ -301,6 +378,8 @@ export function Graph() {
 
   const handleHop = useCallback(
     (entry: TrailEntry) => {
+      pulseEvent(GRAPH_EVENTS.RECENTERED, { surface: EXPLORER_SURFACE, via: 'breadcrumb' });
+      markInteracted(interactedStep);
       graph.focus(entry.id);
       canvasRef.current?.centerOn(entry.id);
     },
@@ -344,13 +423,19 @@ export function Graph() {
         isExpanding={graph.isExpanding}
         proofUsers={proofUsers}
         onProofHover={spotlightProof}
-        onExpand={graph.expand}
-        onRefreshNode={graph.refreshNode}
+        onExpand={(id) => {
+          markInteracted(interactedStep);
+          void graph.expand(id, undefined, 'panel');
+        }}
+        onRefreshNode={(id) => {
+          markInteracted(interactedStep);
+          void graph.refreshNode(id);
+        }}
         onFocus={(id) => {
           graph.focus(id);
           canvasRef.current?.centerOn(id);
         }}
-        onTracePath={graph.tracePath}
+        onTracePath={(pubky) => void graph.tracePath(pubky, 'panel')}
         isTracing={graph.isTracing}
         onClose={() => graph.select(null)}
       />
@@ -386,7 +471,10 @@ export function Graph() {
         communityLabels={graph.communityLabels}
         edgeChipsOn={edgeChipsOn}
         onNodeClick={handleNodeClick}
-        onNodeExpand={graph.expand}
+        onNodeExpand={(id) => {
+          markInteracted(interactedStep);
+          void graph.expand(id, undefined, 'double_click');
+        }}
         onLinkClick={handleLinkClick}
         onUserHover={handleUserHover}
         onBackgroundClick={() => {
@@ -411,18 +499,31 @@ export function Graph() {
             page); the local field is the mobile affordance */}
         <GraphSearch
           className="pointer-events-auto w-full sm:ml-auto sm:w-56 lg:hidden"
-          onPickUser={handlePickUser}
-          onPickTag={handlePickTag}
+          onPickUser={(pubky) => {
+            recordSearchPick('user', 'inline');
+            void handlePickUser(pubky, 'search_pick');
+          }}
+          onPickTag={(label) => {
+            recordSearchPick('tag', 'inline');
+            void handlePickTag(label, 'search_pick');
+          }}
         />
       </div>
 
       <SocialGraphControls
         className="absolute top-14 right-3 z-10 sm:top-3 lg:top-6 lg:right-6"
-        onZoomIn={() => canvasRef.current?.zoomIn()}
-        onZoomOut={() => canvasRef.current?.zoomOut()}
+        onZoomIn={() => {
+          recordControl('zoom-in');
+          canvasRef.current?.zoomIn();
+        }}
+        onZoomOut={() => {
+          recordControl('zoom-out');
+          canvasRef.current?.zoomOut();
+        }}
         timeMachineOn={timeMachineOn}
         timeMachineAvailable={graph.timeBounds !== null}
         onToggleTimeMachine={() => {
+          recordControl('time-toggle', timeMachineOn ? 'off' : 'on');
           setTimeMachineOn((prev) => {
             if (prev) graph.setTimeCap(null);
             return !prev;
@@ -430,31 +531,57 @@ export function Graph() {
         }}
         onRecenterSelf={currentUserPubky ? handleRecenterSelf : undefined}
         isFullscreen={isFullscreen}
-        onToggleFullscreen={toggleFullscreen}
+        onToggleFullscreen={() => {
+          recordControl('fullscreen', isFullscreen ? 'off' : 'on');
+          toggleFullscreen();
+        }}
         advancedContent={
           <SocialGraphAdvancedPanel
             declutter={graph.declutter}
-            onToggleDeclutter={graph.toggleDeclutter}
+            onToggleDeclutter={() => {
+              recordControl('declutter', graph.declutter ? 'off' : 'on');
+              graph.toggleDeclutter();
+            }}
             communitiesOn={graph.communitiesOn}
-            onToggleCommunities={graph.toggleCommunities}
+            onToggleCommunities={() => {
+              recordControl('communities', graph.communitiesOn ? 'off' : 'on');
+              graph.toggleCommunities();
+            }}
             edgeChipsOn={edgeChipsOn}
-            onToggleEdgeChips={toggleEdgeChips}
+            onToggleEdgeChips={() => {
+              recordControl('edge-details', edgeChipsOn ? 'off' : 'on');
+              toggleEdgeChips();
+            }}
             tagHubsOn={tagHubsOn}
-            onToggleTagHubs={toggleTagHubs}
+            onToggleTagHubs={() => {
+              recordControl('tag-hubs', tagHubsOn ? 'off' : 'on');
+              toggleTagHubs();
+            }}
             physicsPaused={physicsPaused}
             onTogglePhysics={() => {
               const next = !physicsPaused;
+              recordControl('physics', next ? 'on' : 'off');
               setPhysicsPaused(next);
               canvasRef.current?.setPaused(next);
             }}
-            onReleasePins={() => canvasRef.current?.releasePins()}
-            onFit={() => canvasRef.current?.fit()}
+            onReleasePins={() => {
+              recordControl('release-pins');
+              canvasRef.current?.releasePins();
+            }}
+            onFit={() => {
+              recordControl('fit');
+              canvasRef.current?.fit();
+            }}
             legend={
               <SocialGraphLegend
                 classCounts={graph.classCounts}
                 hiddenClasses={graph.hiddenClasses}
                 onHoverClass={spotlightClass}
-                onToggleClass={graph.toggleClass}
+                onToggleClass={(cls) => {
+                  // `state` is what the row becomes: toggling a hidden class shows it again
+                  recordControl(`legend-${cls}`, graph.hiddenClasses.has(cls) ? 'on' : 'off');
+                  graph.toggleClass(cls);
+                }}
                 showRecency={hasTies && edgeChipsOn}
                 communitiesOn={graph.communitiesOn && graph.communities !== null}
                 onHoverEdges={spotlightEdgeKind}
@@ -469,7 +596,10 @@ export function Graph() {
           variant="ghost"
           size="icon"
           className={cn(GRAPH_PILL_CLASS, 'absolute top-14 left-3 z-10 sm:top-3 lg:top-6 lg:left-6')}
-          onClick={() => graph.clearPath()}
+          onClick={() => {
+            recordControl('path-exit');
+            graph.clearPath();
+          }}
           aria-label={t('panel.clearPath')}
           title={t('panel.clearPath')}
           data-cy="graph-path-exit"
@@ -535,7 +665,7 @@ export function Graph() {
               name={label}
               onClick={(name) => {
                 setTagPopover(null);
-                void handlePickTag(name);
+                void handlePickTag(name, 'tag_chip');
               }}
             />
           ))}
@@ -574,7 +704,14 @@ export function Graph() {
                 {!centerPubky && !hasContent ? t('states.noUser') : graph.error ? t('states.error') : t('states.empty')}
               </Typography>
               {graph.error && centerPubky && (
-                <Button variant="secondary" onClick={() => load(centerPubky)} data-cy="graph-retry">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    pulseEvent(GRAPH_EVENTS.RETRY_CLICKED, { surface: EXPLORER_SURFACE });
+                    load(centerPubky);
+                  }}
+                  data-cy="graph-retry"
+                >
                   <RotateCcw className="size-4" />
                   {t('states.retry')}
                 </Button>
