@@ -366,7 +366,9 @@ export function useGraphCore({
           pulseEvent(GRAPH_EVENTS.PATH_NOT_FOUND, { ...attrs, reason: 'empty' });
           op.complete({ found: 'false' });
         } else {
-          const hops = String(path.nodes.length);
+          // A path of N nodes is N-1 hops: a direct connection is 2 nodes, 1 hop.
+          // The empty case is the sibling branch above, so this never goes negative.
+          const hops = String(Math.max(0, path.nodes.length - 1));
           pulseEvent(GRAPH_EVENTS.PATH_TRACED, { ...attrs, hops });
           op.complete({ found: 'true', hops });
         }

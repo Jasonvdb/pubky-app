@@ -23,7 +23,7 @@ import {
 } from '@/hooks/useSocialGraph/useSocialGraph.types';
 import { edgeKey, type SocialGraphVisualEdge, socialProof } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useTrackedPoint } from '@/hooks/useTrackedPoint/useTrackedPoint';
-import { pulseEvent, pulseScreen, pulseStep } from '@/libs/observability/pulse';
+import { pulseEvent, pulseStep } from '@/libs/observability/pulse';
 import { GRAPH_EVENTS, GRAPH_FUNNEL_STEPS } from '@/libs/observability/pulse.graph';
 import { cn } from '@/libs/utils/utils';
 import type { Pubky } from '@/models/models.types';
@@ -127,7 +127,8 @@ export function Graph() {
   useEffect(() => {
     if (openedStep.current) return;
     openedStep.current = true;
-    pulseScreen(APP_ROUTES.GRAPH);
+    // No screen call here: `PulseInit` reports every route app-wide, and its
+    // redaction leaves '/graph' verbatim, so a second one is the same event twice
     pulseEvent(GRAPH_EVENTS.OPENED, {
       surface: EXPLORER_SURFACE,
       // How the page was reached; never who it was reached for
@@ -139,7 +140,12 @@ export function Graph() {
 
   // A successful trace is only observable from here as a committed path
   useEffect(() => {
-    if (graph.pathIds && graph.pathIds.length > 0) fireOnce(tracedStep, GRAPH_FUNNEL_STEPS.TRACED);
+    if (!graph.pathIds || graph.pathIds.length === 0) return;
+    // The hover card can trace without any preceding expand, recenter or search
+    // pick, so step 3 may still be unfired; a skipped step makes the drop-off
+    // between it and step 4 meaningless. Both stay once-per-mount via their refs.
+    markInteracted(interactedStep);
+    fireOnce(tracedStep, GRAPH_FUNNEL_STEPS.TRACED);
   }, [graph.pathIds]);
 
   // A search pick focuses, expands, and flies the camera onto the node. The
@@ -350,12 +356,14 @@ export function Graph() {
   const handleRecenterSelf = useCallback(() => {
     if (!currentUserPubky) return;
     const nodeId = `user:${currentUserPubky}`;
-    pulseEvent(GRAPH_EVENTS.RECENTERED, { surface: EXPLORER_SURFACE, via: 'self_button' });
     markInteracted(interactedStep);
     if (graph.nodes.some((n) => n.id === nodeId)) {
+      pulseEvent(GRAPH_EVENTS.RECENTERED, { surface: EXPLORER_SURFACE, via: 'self_button' });
       void recenter(nodeId);
       canvasRef.current?.centerOn(nodeId);
     } else {
+      // Nothing to recenter onto yet: this branch adds the user instead, and
+      // reports itself as the expand it is
       void handlePickUser(currentUserPubky);
     }
   }, [currentUserPubky, graph.nodes, recenter, handlePickUser]);

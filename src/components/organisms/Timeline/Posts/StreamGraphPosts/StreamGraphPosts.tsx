@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { Loader2, StickyNote, X } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/atoms/Button/Button';
+import { toSafeScreenName } from '@/atoms/PulseInit/PulseInit';
 import { Spinner } from '@/atoms/Spinner/Spinner';
 import { Typography } from '@/atoms/Typography/Typography';
 import { GRAPH_PILL_CLASS } from '@/config/theme';
@@ -110,9 +112,19 @@ export function StreamGraphPosts({
   useEffect(() => {
     if (layoutReported.current) return;
     layoutReported.current = true;
-    pulseScreen(FEED_GRAPH_SCREEN);
     pulseEvent(GRAPH_EVENTS.LAYOUT_SELECTED, { surface: FEED_SURFACE });
   }, []);
+
+  // The synthetic screen name is owned only while this layout is mounted.
+  // `PulseInit` reports the route itself, so leaving the layout — a switch back
+  // to a list layout, or a navigation away — has to hand the route's own screen
+  // back, or every later event in the session still reports '/feed/graph'.
+  const pathname = usePathname();
+  useEffect(() => {
+    if (!pathname) return;
+    pulseScreen(FEED_GRAPH_SCREEN);
+    return () => pulseScreen(toSafeScreenName(pathname));
+  }, [pathname]);
 
   const proofUsers = useMemo(() => {
     if (!meId || !graph.selectedNode || graph.selectedNode.kind !== 'user' || graph.selectedNode.id === meId) {
@@ -213,7 +225,7 @@ export function StreamGraphPosts({
   const handleTraceConnection = useCallback(
     (pubky: string) => {
       setHoverCard(null);
-      void graph.tracePath(pubky as Pubky);
+      void graph.tracePath(pubky as Pubky, 'hover_card');
     },
     [graph],
   );
@@ -252,7 +264,7 @@ export function StreamGraphPosts({
         communityLabels={new Map()}
         edgeChipsOn={edgeChipsOn}
         onNodeClick={handleNodeClick}
-        onNodeExpand={graph.expand}
+        onNodeExpand={(id) => void graph.expand(id, undefined, 'double_click')}
         onUserHover={handleUserHover}
         onBackgroundClick={() => {
           graph.select(null);
@@ -377,10 +389,10 @@ export function StreamGraphPosts({
           isExpanding={graph.isExpanding}
           proofUsers={proofUsers}
           onProofHover={() => undefined}
-          onExpand={graph.expand}
+          onExpand={(id) => void graph.expand(id, undefined, 'panel')}
           onRefreshNode={graph.refreshNode}
           onFocus={(id) => canvasRef.current?.centerOn(id)}
-          onTracePath={graph.tracePath}
+          onTracePath={(pubky) => void graph.tracePath(pubky, 'panel')}
           isTracing={graph.isTracing}
           onClose={() => graph.select(null)}
         />

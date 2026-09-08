@@ -5,7 +5,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { PostController } from '@/controllers/post/post';
 import { UserController } from '@/controllers/user/user';
 import { markBirths, type SimNode, useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
-import { type HideableClass } from '@/hooks/useSocialGraph/useSocialGraph.types';
+import {
+  type GraphExpandSource,
+  type GraphTraceVia,
+  type HideableClass,
+} from '@/hooks/useSocialGraph/useSocialGraph.types';
 import {
   type GraphRelationship,
   type GraphTier,
@@ -51,13 +55,14 @@ export type UseStreamGraphResult = {
   isExpanding: boolean;
   isTracing: boolean;
   select: (id: string | null) => void;
-  expand: (nodeId: string, anchorId?: string) => Promise<void>;
+  /** Widened to the core's own signature so the feed can name the affordance that expanded */
+  expand: (nodeId: string, anchorId?: string, source?: GraphExpandSource) => Promise<void>;
   refreshNode: (nodeId: string) => Promise<void>;
   /** Design click behavior: focus + one-time expand pruned around the clicked user */
   recenter: (nodeId: string) => Promise<void>;
   /** Merge a tag's neighborhood in and select its hub (chip click) */
   addTag: (label: string) => Promise<void>;
-  tracePath: (pubky: Pubky) => Promise<void>;
+  tracePath: (pubky: Pubky, via?: GraphTraceVia) => Promise<void>;
   clearPath: () => void;
   toggleClass: (cls: HideableClass) => void;
   toggleDeclutter: () => void;
