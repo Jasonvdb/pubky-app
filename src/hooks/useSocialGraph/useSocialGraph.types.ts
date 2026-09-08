@@ -1,4 +1,3 @@
-import type { Surface } from '@/libs/observability/pulse.graph';
 import type { Pubky } from '@/models/models.types';
 import type { NexusGraphNode } from '@/services/nexus/graph/graph.types';
 import type { GraphNodeClass } from '@/stores/graph/graph.types';
@@ -9,9 +8,6 @@ export const MAX_CLIENT_NODES = 400;
 
 /** Visible-edge threshold that auto-engages declutter (once per session). */
 export const AUTO_DECLUTTER_EDGES = 600;
-
-/** Pulse surface tag on every event the explorer page emits. */
-export const EXPLORER_SURFACE: Surface = 'explorer';
 
 /**
  * Which affordance triggered an expansion. Reported as the `source` of

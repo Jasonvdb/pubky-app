@@ -7,6 +7,7 @@ import { useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
 import { Logger } from '@/libs/logger/logger';
 import { pulseEvent, pulseOperation, pulseStep, pulseWarn } from '@/libs/observability/pulse';
 import {
+  EXPLORER_SURFACE,
   GRAPH_ERROR_EVENTS,
   GRAPH_EVENTS,
   GRAPH_FUNNEL_STEPS,
@@ -18,12 +19,7 @@ import { toast } from '@/molecules/Toaster/use-toast';
 import type { NexusGraph, NexusGraphEdge, NexusGraphNode } from '@/services/nexus/graph/graph.types';
 import { useAuthStore } from '@/stores/auth/auth.store';
 import { useGraphStore } from '@/stores/graph/graph.store';
-import {
-  AUTO_DECLUTTER_EDGES,
-  EXPLORER_SURFACE,
-  type TrailEntry,
-  type UseSocialGraphResult,
-} from './useSocialGraph.types';
+import { AUTO_DECLUTTER_EDGES, type TrailEntry, type UseSocialGraphResult } from './useSocialGraph.types';
 import { detectCommunities, dominantLabel, type GraphRelationship, relationshipMap } from './useSocialGraph.utils';
 
 function trailEntryOf(node: NexusGraphNode): TrailEntry | null {

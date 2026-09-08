@@ -19,7 +19,7 @@ import {
   type VisualGraphNode,
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { Logger } from '@/libs/logger/logger';
-import { GRAPH_ERROR_EVENTS, pulseGraphError, pulseGraphWarn, type Surface } from '@/libs/observability/pulse.graph';
+import { FEED_SURFACE, GRAPH_ERROR_EVENTS, pulseGraphError, pulseGraphWarn } from '@/libs/observability/pulse.graph';
 import type { Pubky } from '@/models/models.types';
 import type { NexusGraph, NexusGraphEdge, NexusGraphNode } from '@/services/nexus/graph/graph.types';
 import { useAuthStore } from '@/stores/auth/auth.store';
@@ -27,9 +27,6 @@ import { type StreamPostInput, streamToGraph, tryParseCompositeId, viewerRelatio
 
 type ViewerRelFlags = Map<string, { following: boolean; followed_by: boolean }>;
 const EMPTY_RELS: ViewerRelFlags = new Map();
-
-/** Pulse surface tag on every event this hook's graph core emits. */
-const FEED_SURFACE: Surface = 'feed';
 
 export type UseStreamGraphResult = {
   nodes: VisualGraphNode[];

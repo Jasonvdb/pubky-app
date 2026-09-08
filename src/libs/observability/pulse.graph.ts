@@ -1,5 +1,11 @@
 import { isAppError } from '@/libs/error/error';
-import { pulseCaptureError, pulseWarn, REDACTED_PATH_SEGMENT, redactPathSegments } from '@/libs/observability/pulse';
+import {
+  pulseCaptureError,
+  pulseEvent,
+  pulseWarn,
+  REDACTED_PATH_SEGMENT,
+  redactPathSegments,
+} from '@/libs/observability/pulse';
 import { RAW_PUBKY_PATTERN } from '@/libs/observability/sentry.constants';
 
 /**
@@ -23,6 +29,12 @@ import { RAW_PUBKY_PATTERN } from '@/libs/observability/sentry.constants';
 
 /** Which graph surface produced the event. Stamped on every event below as `surface`. */
 export type Surface = 'explorer' | 'feed';
+
+/** The explorer page (`/graph`). */
+export const EXPLORER_SURFACE: Surface = 'explorer';
+
+/** The feed's "Graph" layout. */
+export const FEED_SURFACE: Surface = 'feed';
 
 /** Funnel that measures how far a session gets into the explorer. */
 export const GRAPH_FUNNEL_SLUG = 'graph-explore';
@@ -195,4 +207,13 @@ function toThrownValueAttributes(error: unknown): Record<string, string> {
 export function pulseGraphWarn(err: unknown, name: string, attrs?: Record<string, string>): void {
   const breakdown = isAppError(err) ? toErrorAttributes(err) : toThrownValueAttributes(err);
   pulseWarn(name, { ...breakdown, ...attrs });
+}
+
+/**
+ * `graph_control_used`: one event with a `control` breakdown, never one event per control.
+ * `control` is the control's `data-cy` suffix verbatim, and `state` is what the control
+ * becomes (omitted for the ones that do not toggle).
+ */
+export function pulseGraphControl(surface: Surface, control: string, state?: 'on' | 'off'): void {
+  pulseEvent(GRAPH_EVENTS.CONTROL_USED, { surface, control, ...(state ? { state } : {}) });
 }

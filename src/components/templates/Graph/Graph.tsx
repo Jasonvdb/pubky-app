@@ -15,16 +15,16 @@ import { useFullscreenToggle } from '@/hooks/useFullscreenToggle/useFullscreenTo
 import { useGraphDebug } from '@/hooks/useGraphDebug/useGraphDebug';
 import { useIsMobile } from '@/hooks/useIsMobile/useIsMobile';
 import { useSocialGraph } from '@/hooks/useSocialGraph/useSocialGraph';
-import {
-  EXPLORER_SURFACE,
-  type GraphExpandSource,
-  type HideableClass,
-  type TrailEntry,
-} from '@/hooks/useSocialGraph/useSocialGraph.types';
+import type { GraphExpandSource, HideableClass, TrailEntry } from '@/hooks/useSocialGraph/useSocialGraph.types';
 import { edgeKey, type SocialGraphVisualEdge, socialProof } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useTrackedPoint } from '@/hooks/useTrackedPoint/useTrackedPoint';
 import { pulseEvent, pulseStep } from '@/libs/observability/pulse';
-import { GRAPH_EVENTS, GRAPH_FUNNEL_STEPS } from '@/libs/observability/pulse.graph';
+import {
+  EXPLORER_SURFACE,
+  GRAPH_EVENTS,
+  GRAPH_FUNNEL_STEPS,
+  pulseGraphControl,
+} from '@/libs/observability/pulse.graph';
 import { cn } from '@/libs/utils/utils';
 import type { Pubky } from '@/models/models.types';
 import { CanvasAnchoredPopover } from '@/molecules/CanvasAnchoredPopover/CanvasAnchoredPopover';
@@ -56,14 +56,8 @@ function fireOnce(fired: MutableRefObject<boolean>, step: string): void {
   pulseStep(step);
 }
 
-/**
- * `graph_control_used`: one event with a `control` breakdown, never one event per
- * control. `control` is the control's `data-cy` suffix verbatim, and `state` is what
- * the control becomes (omitted for the ones that do not toggle).
- */
-function recordControl(control: string, state?: 'on' | 'off'): void {
-  pulseEvent(GRAPH_EVENTS.CONTROL_USED, { surface: EXPLORER_SURFACE, control, ...(state ? { state } : {}) });
-}
+/** `graph_control_used` for this surface. */
+const recordControl = (control: string, state?: 'on' | 'off') => pulseGraphControl(EXPLORER_SURFACE, control, state);
 
 /** `graph_search_pick`. The pick's own expand marks the funnel step that follows it. */
 function recordSearchPick(kind: 'user' | 'tag', origin: 'header' | 'inline'): void {

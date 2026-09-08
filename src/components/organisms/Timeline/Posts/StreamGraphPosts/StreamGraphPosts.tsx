@@ -17,7 +17,7 @@ import { socialProof } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useStreamGraph } from '@/hooks/useStreamGraph/useStreamGraph';
 import { useTrackedPoint } from '@/hooks/useTrackedPoint/useTrackedPoint';
 import { pulseEvent, pulseScreen } from '@/libs/observability/pulse';
-import { GRAPH_EVENTS, type Surface } from '@/libs/observability/pulse.graph';
+import { FEED_SURFACE, GRAPH_EVENTS, pulseGraphControl } from '@/libs/observability/pulse.graph';
 import { cn } from '@/libs/utils/utils';
 import type { Pubky } from '@/models/models.types';
 import { GraphTimeMachine } from '@/molecules/GraphTimeMachine/GraphTimeMachine';
@@ -43,9 +43,6 @@ export interface StreamGraphPostsProps {
 
 type HoverCard = { node: NexusGraphUserNode; x: number; y: number };
 
-/** Pulse surface tag on every event this layout emits. */
-const FEED_SURFACE: Surface = 'feed';
-
 /**
  * The graph layout is a mode inside several stream routes (`/home`, `/search`, ...),
  * not a route of its own, so it reports a synthetic screen name the SDK's own
@@ -53,14 +50,8 @@ const FEED_SURFACE: Surface = 'feed';
  */
 const FEED_GRAPH_SCREEN = '/feed/graph';
 
-/**
- * `graph_control_used`: one event with a `control` breakdown, never one event per
- * control. `control` is the control's `data-cy` suffix verbatim, and `state` is what
- * the control becomes (omitted for the ones that do not toggle).
- */
-function recordControl(control: string, state?: 'on' | 'off'): void {
-  pulseEvent(GRAPH_EVENTS.CONTROL_USED, { surface: FEED_SURFACE, control, ...(state ? { state } : {}) });
-}
+/** `graph_control_used` for this surface. */
+const recordControl = (control: string, state?: 'on' | 'off') => pulseGraphControl(FEED_SURFACE, control, state);
 
 /**
  * StreamGraphPosts

@@ -72,6 +72,67 @@ async function withProdEnvPulse(run: (mod: typeof import('./pulse')) => void | P
   }
 }
 
+/** The SDK surface `pulse.ts` calls, mocked so every emitted attribute is observable. */
+type MockedPulseSdk = {
+  configure: ReturnType<typeof vi.fn>;
+  info: ReturnType<typeof vi.fn>;
+  warn: ReturnType<typeof vi.fn>;
+  error: ReturnType<typeof vi.fn>;
+  step: ReturnType<typeof vi.fn>;
+  trackScreen: ReturnType<typeof vi.fn>;
+  startOperation: ReturnType<typeof vi.fn>;
+};
+
+/** A fully stubbed SDK; `overrides` replaces the one method a test needs to drive itself. */
+function mockSdk(overrides: Partial<MockedPulseSdk> = {}): MockedPulseSdk {
+  return {
+    configure: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    step: vi.fn(),
+    trackScreen: vi.fn(),
+    startOperation: vi.fn(),
+    ...overrides,
+  };
+}
+
+/**
+ * Import a fresh ./pulse with the SDK mocked (so `Pulse.configure()` calls are observable and
+ * no real SDK boots) and Env mocked to a deployed shape.
+ *
+ * `NODE_ENV` / `VITEST` are stubbed on `process.env` too: runtime-config reads those directly,
+ * and only in "required" mode does a missing `window.__PUBKY_CONFIG__` throw instead of quietly
+ * falling back to `NEXT_PUBLIC_*` — the throw is exactly the browser condition under test.
+ */
+async function withMockedSdk(
+  sdk: MockedPulseSdk,
+  run: (mod: typeof import('./pulse')) => void | Promise<void>,
+): Promise<void> {
+  vi.resetModules();
+  vi.doMock('@synonymdev/pubky-pulse-web', () => ({ Pulse: sdk }));
+  vi.doMock('@/libs/env/env', () => ({
+    Env: {
+      NODE_ENV: 'production',
+      VITEST: undefined,
+      NEXT_PUBLIC_APP_VERSION: 'test',
+    },
+  }));
+  vi.doMock('@/libs/logger/logger', () => ({ Logger: { warn: vi.fn() } }));
+  vi.stubEnv('NODE_ENV', 'production');
+  vi.stubEnv('VITEST', '');
+
+  try {
+    await run(await import('./pulse'));
+  } finally {
+    vi.unstubAllEnvs();
+    vi.doUnmock('@/libs/logger/logger');
+    vi.doUnmock('@/libs/env/env');
+    vi.doUnmock('@synonymdev/pubky-pulse-web');
+    vi.resetModules();
+  }
+}
+
 describe('shouldEnablePulse', () => {
   it('is disabled under Vitest even with a valid client key configured', () => {
     const removeRuntimeConfig = injectRuntimeConfig();
@@ -182,62 +243,25 @@ describe('helpers before initPulse()', () => {
 });
 
 describe('initPulse', () => {
-  /**
-   * Import a fresh ./pulse with the SDK mocked (so `Pulse.configure()` calls are observable and
-   * no real SDK boots) and Env mocked to a deployed shape.
-   *
-   * `NODE_ENV` / `VITEST` are stubbed on `process.env` too: runtime-config reads those directly,
-   * and only in "required" mode does a missing `window.__PUBKY_CONFIG__` throw instead of quietly
-   * falling back to `NEXT_PUBLIC_*` — the throw is exactly the browser condition under test.
-   */
-  async function withMockedSdk(
-    configure: () => void,
-    run: (mod: typeof import('./pulse')) => void | Promise<void>,
-  ): Promise<void> {
-    vi.resetModules();
-    vi.doMock('@synonymdev/pubky-pulse-web', () => ({ Pulse: { configure } }));
-    vi.doMock('@/libs/env/env', () => ({
-      Env: {
-        NODE_ENV: 'production',
-        VITEST: undefined,
-        NEXT_PUBLIC_APP_VERSION: 'test',
-      },
-    }));
-    vi.doMock('@/libs/logger/logger', () => ({ Logger: { warn: vi.fn() } }));
-    vi.stubEnv('NODE_ENV', 'production');
-    vi.stubEnv('VITEST', '');
-
-    try {
-      const mod = await import('./pulse');
-      await run(mod);
-    } finally {
-      vi.unstubAllEnvs();
-      vi.doUnmock('@/libs/logger/logger');
-      vi.doUnmock('@/libs/env/env');
-      vi.doUnmock('@synonymdev/pubky-pulse-web');
-      vi.resetModules();
-    }
-  }
-
   it('stays initializable after a call made before window.__PUBKY_CONFIG__ was injected', async () => {
-    const configure = vi.fn();
+    const sdk = mockSdk();
 
-    await withMockedSdk(configure, ({ initPulse, isPulseActive }) => {
+    await withMockedSdk(sdk, ({ initPulse, isPulseActive }) => {
       // The runtime config is published by a beforeInteractive script that has not run yet, so
       // the gate cannot resolve it. That must not latch "disabled" for the life of the page.
       initPulse();
-      expect(configure).not.toHaveBeenCalled();
+      expect(sdk.configure).not.toHaveBeenCalled();
       expect(isPulseActive()).toBe(false);
 
       const removeRuntimeConfig = injectRuntimeConfig();
       try {
         initPulse();
-        expect(configure).toHaveBeenCalledTimes(1);
+        expect(sdk.configure).toHaveBeenCalledTimes(1);
         expect(isPulseActive()).toBe(true);
 
         // Idempotent: a remount or a StrictMode double-invoke reconfigures nothing.
         initPulse();
-        expect(configure).toHaveBeenCalledTimes(1);
+        expect(sdk.configure).toHaveBeenCalledTimes(1);
       } finally {
         removeRuntimeConfig();
       }
@@ -245,17 +269,19 @@ describe('initPulse', () => {
   });
 
   it('never retries Pulse.configure() once it has thrown', async () => {
-    const configure = vi.fn(() => {
-      throw new Error('invalid Pulse configuration');
+    const sdk = mockSdk({
+      configure: vi.fn(() => {
+        throw new Error('invalid Pulse configuration');
+      }),
     });
 
-    await withMockedSdk(configure, ({ initPulse, isPulseActive }) => {
+    await withMockedSdk(sdk, ({ initPulse, isPulseActive }) => {
       const removeRuntimeConfig = injectRuntimeConfig();
       try {
         expect(() => initPulse()).not.toThrow();
         expect(() => initPulse()).not.toThrow();
 
-        expect(configure).toHaveBeenCalledTimes(1);
+        expect(sdk.configure).toHaveBeenCalledTimes(1);
         expect(isPulseActive()).toBe(false);
       } finally {
         removeRuntimeConfig();
@@ -263,17 +289,6 @@ describe('initPulse', () => {
     });
   });
 });
-
-/** The SDK surface `pulse.ts` calls, mocked so every emitted attribute is observable. */
-type MockedPulseSdk = {
-  configure: ReturnType<typeof vi.fn>;
-  info: ReturnType<typeof vi.fn>;
-  warn: ReturnType<typeof vi.fn>;
-  error: ReturnType<typeof vi.fn>;
-  step: ReturnType<typeof vi.fn>;
-  trackScreen: ReturnType<typeof vi.fn>;
-  startOperation: ReturnType<typeof vi.fn>;
-};
 
 type ConfiguredPulse = {
   sdk: MockedPulseSdk;
@@ -295,46 +310,21 @@ type ConfiguredPulse = {
  * really runs, so `pulseGraphError` / `pulseGraphWarn` / `pulseScreen` emit for real.
  */
 async function withConfiguredPulse(run: (ctx: ConfiguredPulse) => void | Promise<void>): Promise<void> {
-  const sdk: MockedPulseSdk = {
-    configure: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    step: vi.fn(),
-    trackScreen: vi.fn(),
-    startOperation: vi.fn(),
-  };
-
-  vi.resetModules();
-  vi.doMock('@synonymdev/pubky-pulse-web', () => ({ Pulse: sdk }));
-  vi.doMock('@/libs/env/env', () => ({
-    Env: {
-      NODE_ENV: 'production',
-      VITEST: undefined,
-      NEXT_PUBLIC_APP_VERSION: 'test',
-    },
-  }));
-  vi.doMock('@/libs/logger/logger', () => ({ Logger: { warn: vi.fn() } }));
-  vi.stubEnv('NODE_ENV', 'production');
-  vi.stubEnv('VITEST', '');
+  const sdk = mockSdk();
   const removeRuntimeConfig = injectRuntimeConfig();
 
   try {
-    const pulse = await import('./pulse');
-    pulse.initPulse();
-    expect(pulse.isPulseActive()).toBe(true);
+    await withMockedSdk(sdk, async (pulse) => {
+      pulse.initPulse();
+      expect(pulse.isPulseActive()).toBe(true);
 
-    const graph = await import('./pulse.graph');
-    const { AppError: FreshAppError } = await import('@/libs/error/error');
+      const graph = await import('./pulse.graph');
+      const { AppError: FreshAppError } = await import('@/libs/error/error');
 
-    await run({ sdk, pulse, graph, AppError: FreshAppError });
+      await run({ sdk, pulse, graph, AppError: FreshAppError });
+    });
   } finally {
     removeRuntimeConfig();
-    vi.unstubAllEnvs();
-    vi.doUnmock('@/libs/logger/logger');
-    vi.doUnmock('@/libs/env/env');
-    vi.doUnmock('@synonymdev/pubky-pulse-web');
-    vi.resetModules();
   }
 }
 

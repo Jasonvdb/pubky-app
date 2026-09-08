@@ -49,15 +49,6 @@ import { useGraphStore } from '@/stores/graph/graph.store';
 
 const EMPTY_GRAPH: NexusGraph = { nodes: [], edges: [] };
 
-/**
- * The `surface` attribute bag, empty while the caller has not declared one.
- * Defaulting it would mislabel the other surface's events, which is worse than
- * a breakdown that is simply absent.
- */
-function surfaceAttrs(surface: Surface | undefined): Record<string, string> {
-  return surface ? { surface } : {};
-}
-
 /** Simulation-facing transient fields force-graph and the painter live on. */
 export type SimNode = VisualGraphNode & { x?: number; y?: number; __bornAt?: number };
 
@@ -85,7 +76,7 @@ export type GraphCoreOptions = {
    */
   capPostsByTier?: boolean;
   /** Which graph surface this instance drives; stamped on every Pulse event it emits */
-  surface?: Surface;
+  surface: Surface;
 };
 
 export type GraphCore = {
@@ -255,7 +246,7 @@ export function useGraphCore({
       if (!force && expandedIds.has(nodeId)) return;
       const nonce = loadNonce.current;
       // Started after the guards, so a call that expands nothing is not an attempt
-      const op = pulseOperation(GRAPH_METRICS.NODE_EXPAND, { ...surfaceAttrs(surface), kind: node.kind });
+      const op = pulseOperation(GRAPH_METRICS.NODE_EXPAND, { surface, kind: node.kind });
       setIsExpanding(true);
       try {
         const neighborhood = await GraphController.fetchNeighborhood(
@@ -279,7 +270,7 @@ export function useGraphCore({
         const added = neighborhood.nodes.reduce((total, n) => total + (known.has(n.id) ? 0 : 1), 0);
         const counts = { added_nodes: String(added), total_nodes: String(graph.nodes.length + added) };
         pulseEvent(GRAPH_EVENTS.NODE_EXPANDED, {
-          ...surfaceAttrs(surface),
+          surface,
           // A recenter expands as a side effect and has no affordance in the
           // taxonomy, so its source is omitted rather than guessed
           ...(source ? { source } : {}),
@@ -291,7 +282,7 @@ export function useGraphCore({
         // Non-fatal: the current graph stays untouched
         Logger.error(`${logTag}: failed to expand node`, err);
         toast({ description: t('states.expandError') });
-        pulseGraphError(err, GRAPH_ERROR_EVENTS.EXPAND_FAILED, { ...surfaceAttrs(surface), kind: node.kind });
+        pulseGraphError(err, GRAPH_ERROR_EVENTS.EXPAND_FAILED, { surface, kind: node.kind });
         op.fail(err);
       } finally {
         setIsExpanding(false);
@@ -336,7 +327,7 @@ export function useGraphCore({
       } catch (err) {
         Logger.error(`${logTag}: failed to add tag`, err);
         toast({ description: t('states.expandError') });
-        pulseGraphError(err, GRAPH_ERROR_EVENTS.ADD_TAG_FAILED, surfaceAttrs(surface));
+        pulseGraphError(err, GRAPH_ERROR_EVENTS.ADD_TAG_FAILED, { surface });
       } finally {
         setIsExpanding(false);
       }
@@ -348,7 +339,7 @@ export function useGraphCore({
     async (targetPubky: Pubky, via?: GraphTraceVia) => {
       if (!currentUserPubky || isTracing) return;
       const nonce = loadNonce.current;
-      const attrs = { ...surfaceAttrs(surface), ...(via ? { via } : {}) };
+      const attrs = { surface, ...(via ? { via } : {}) };
       const op = pulseOperation(GRAPH_METRICS.PATH_TRACE, attrs);
       setIsTracing(true);
       try {
