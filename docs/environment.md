@@ -80,14 +80,15 @@ The contract has three tiers:
 Pulse browser telemetry is opt-in: set the public, write-only `PUBKY_RUNTIME_PULSE_CLIENT_KEY`
 (`pulse_client_…`, never an admin key); omit it for zero Pulse tracking. `PUBKY_RUNTIME_PULSE_ENDPOINT`
 optionally overrides the SDK's hosted endpoint. Pulse collects anonymous sessions, route templates,
-origin-only network timing and errors scrubbed by the same redaction/drop policy as Sentry; never
-bodies, replay, raw error context or identified users.
+origin-only failed network requests and errors scrubbed by the same redaction/drop policy as Sentry;
+never bodies, replay, raw error context, successful-request timings or identified users.
 
 With a client key configured, an analytics banner asks each browser for consent before Pulse
 initializes or stores an identifier. Accept/decline is stored separately as `pubky-pulse-consent-v1`.
 Users can withdraw in **Settings → Privacy and Safety** or the **Analytics settings** button
-(also available to guests). Withdrawal stops collection and pending sends; it does not delete
-previously collected data. Without a key, neither the banner nor analytics controls appear.
+(also available to guests). Withdrawal stops collection without flushing and deletes the anonymous ID,
+session and any queued events from this browser; it does not delete data the server already received.
+Without a key, neither the banner nor analytics controls appear.
 Only consented visits are measured, so analytics are a partial, self-selected view of usage.
 
 ### Why a separate mechanism

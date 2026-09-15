@@ -16,6 +16,19 @@ vi.mock('@/libs/runtime-config/runtime-config', async (importOriginal) => ({
 let unsubscribe: (() => void) | undefined;
 const requests = vi.fn<typeof fetch>();
 
+function sentPayloads(): string {
+  return requests.mock.calls
+    .map(([, init]) => init?.body)
+    .map((body) => (typeof body === 'string' ? body : gunzipSync(body as Uint8Array).toString()))
+    .join('\n');
+}
+
+function sdkKeys(store: Storage): string[] {
+  return Array.from({ length: store.length }, (_, index) => store.key(index) ?? '').filter((key) =>
+    key.startsWith('pulse.'),
+  );
+}
+
 beforeEach(() => {
   config.key = 'pulse_client_test';
   localStorage.clear();
@@ -72,9 +85,7 @@ describe('consent gate with the real Pulse SDK', () => {
     Pulse.captureException(new Error('Consented error'));
     await Pulse.flush();
     expect(requests).toHaveBeenCalled();
-    const body = requests.mock.calls[0][1]?.body;
-    const payload = typeof body === 'string' ? body : gunzipSync(body as Uint8Array).toString();
-    expect(payload).toContain('Consented error');
+    expect(sentPayloads()).toContain('Consented error');
     requests.mockClear();
     Pulse.captureException(new Error('Pending before withdrawal'));
     setPulseConsent(false);
@@ -84,6 +95,26 @@ describe('consent gate with the real Pulse SDK', () => {
     expect(Pulse.currentUserId).toBeUndefined();
     expect(requests).not.toHaveBeenCalled();
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('declined');
+    // Withdrawal deletes what the banner asked consent to store, not only the consent choice.
+    expect(localStorage.getItem('pulse.anonymous_id')).toBeNull();
+    expect(sdkKeys(localStorage)).toEqual([]);
+    expect(sdkKeys(sessionStorage)).toEqual([]);
+  });
+
+  it('starts over as a new anonymous browser after re-acceptance without replaying withdrawn events', async () => {
+    unsubscribe = initializePulseConsent();
+    setPulseConsent(true);
+    const firstId = Pulse.currentUserId;
+    expect(firstId).toMatch(/^pulse_anon_/);
+    Pulse.captureException(new Error('Pending before withdrawal'));
+    setPulseConsent(false);
+    setPulseConsent(true);
+    expect(Pulse.currentUserId).toMatch(/^pulse_anon_/);
+    expect(Pulse.currentUserId).not.toBe(firstId);
+    Pulse.captureException(new Error('After re-acceptance'));
+    await Pulse.flush();
+    expect(sentPayloads()).toContain('After re-acceptance');
+    expect(sentPayloads()).not.toContain('Pending before withdrawal');
   });
 
   it('honors saved consent and a withdrawal from another tab', async () => {
@@ -95,6 +126,8 @@ describe('consent gate with the real Pulse SDK', () => {
     await Pulse.flush();
     expect(Pulse.currentUserId).toBeUndefined();
     expect(requests).not.toHaveBeenCalled();
+    expect(sdkKeys(localStorage)).toEqual([]);
+    expect(sdkKeys(sessionStorage)).toEqual([]);
   });
 
   it('fails closed when storage cannot be read or a choice cannot be saved', () => {

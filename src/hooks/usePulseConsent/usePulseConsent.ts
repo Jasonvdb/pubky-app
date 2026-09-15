@@ -6,6 +6,10 @@ import { getPulseConsent, setPulseConsent, subscribePulseConsent } from '@/libs/
 export function usePulseConsent() {
   const consent = useSyncExternalStore(subscribePulseConsent, getPulseConsent, () => 'unavailable' as const);
   const [saveFailed, setSaveFailed] = useState(false);
-  const choose = (accepted: boolean) => setSaveFailed(!setPulseConsent(accepted));
+  const choose = (accepted: boolean) => {
+    const saved = setPulseConsent(accepted);
+    setSaveFailed(!saved);
+    return saved;
+  };
   return { consent, choose, saveFailed };
 }

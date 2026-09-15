@@ -15,7 +15,7 @@ export function PulseConsentBanner() {
   const [open, setOpen] = useState(false);
   if (consent === 'unavailable') return null;
 
-  if (consent !== null && !open && !saveFailed) {
+  if (consent !== null && !open) {
     // Guests need the same withdrawal access as signed-in users, without creating an account.
     return (
       <Button
@@ -52,26 +52,18 @@ export function PulseConsentBanner() {
         </p>
       )}
       <div className="flex flex-wrap gap-3">
-        <Button
-          variant="secondary"
-          className="flex-1"
-          onClick={() => {
-            choose(false);
-            setOpen(false);
-          }}
-        >
+        <Button variant="secondary" className="flex-1" onClick={() => setOpen(!choose(false))}>
           {consent === 'accepted' ? 'Withdraw consent' : 'Decline'}
         </Button>
-        <Button
-          variant="secondary"
-          className="flex-1"
-          onClick={() => {
-            choose(true);
-            setOpen(false);
-          }}
-        >
+        <Button variant="secondary" className="flex-1" onClick={() => setOpen(!choose(true))}>
           Accept
         </Button>
+        {saveFailed && (
+          // A failed save keeps the banner open to show the error, so it needs its own way out.
+          <Button variant="secondary" className="flex-1" onClick={() => setOpen(false)}>
+            Close
+          </Button>
+        )}
       </div>
     </section>
   );

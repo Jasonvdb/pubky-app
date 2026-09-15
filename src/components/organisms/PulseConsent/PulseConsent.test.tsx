@@ -80,14 +80,24 @@ describe('Pulse consent', () => {
     expect(screen.getByRole('switch', { name: 'Optional analytics' })).not.toBeChecked();
   });
 
-  it('explains a failed save and leaves analytics off', () => {
+  it('explains a failed save, leaves analytics off and lets the visitor close the banner and retry', () => {
     render(<PulseConsentBanner />);
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const blocked = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Blocked');
     });
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
     expect(screen.getByRole('alert')).toHaveTextContent('Analytics is off');
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('region', { name: 'Analytics consent' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Analytics settings' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Analytics is off');
+    blocked.mockRestore();
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('accepted');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Analytics consent' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Analytics settings' })).toBeInTheDocument();
   });
 });
 

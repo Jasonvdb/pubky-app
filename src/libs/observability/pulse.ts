@@ -86,7 +86,9 @@ export function initPulse(): void {
         /Java exception was raised during method invocation/,
         /Failed to connect to MetaMask/,
       ],
-      networkTracking: { urlMode: 'origin' },
+      // Failures only: rejected fetches pass through ignoreErrors and drop to warn while offline; successful
+      // requests are sampled per session and nothing consumes their timings yet.
+      networkTracking: { urlMode: 'origin', sampleRate: 0 },
       screenNameForPath: pulseScreenName,
       beforeSend: beforeSendPulse,
     });
@@ -103,8 +105,9 @@ export function initializePulseConsent(): () => void {
       if (!started) initPulse();
       started = true;
     } else if (started) {
-      // shutdown() flushes. Disable synchronously to discard pending sends and remove collectors.
-      Pulse.init({ enabled: false });
+      // reset() disables synchronously without flushing, removes collectors and deletes the anonymous ID,
+      // session and queued events the banner asked consent to store, so nothing replays on re-acceptance.
+      Pulse.reset();
       started = false;
     }
   };

@@ -39,7 +39,7 @@ function event(overrides: Partial<LogEvent> = {}): LogEvent {
     message: 'Unexpected failure',
     environment: 'web',
     sdk_name: 'pubky-pulse-web',
-    sdk_version: '0.7.0',
+    sdk_version: '0.8.0',
     is_dev: true,
     timestamp: '2026-09-08T00:00:00.000Z',
     ...overrides,
@@ -88,7 +88,7 @@ describe('optional Pulse initialization', () => {
         /Java exception was raised during method invocation/,
         /Failed to connect to MetaMask/,
       ],
-      networkTracking: { urlMode: 'origin' },
+      networkTracking: { urlMode: 'origin', sampleRate: 0 },
       screenNameForPath: pulseScreenName,
       beforeSend: beforeSendPulse,
     });
