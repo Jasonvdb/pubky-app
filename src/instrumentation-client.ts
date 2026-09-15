@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
-import { initPulse } from '@/libs/observability/pulse';
+import { initializePulseConsent } from '@/libs/observability/pulse';
 import { getSentryInitBase, shouldEnableSentry } from '@/libs/observability/sentry';
 import {
   getSentryReplaysOnErrorSampleRate,
@@ -18,7 +18,7 @@ if (window[RUNTIME_CONFIG_WINDOW_KEY] === undefined) {
   );
 }
 
-initPulse();
+initializePulseConsent();
 
 if (shouldEnableSentry()) {
   Sentry.init({

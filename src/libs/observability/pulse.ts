@@ -16,6 +16,7 @@ import { Env } from '@/libs/env/env';
 import { AppError } from '@/libs/error/error';
 import { sanitizeForSentry, shouldDropCapturedExceptionFromSentry } from '@/libs/observability/sentry.utils';
 import { getDeployEnv, getPulseClientKey, getPulseEndpoint } from '@/libs/runtime-config/runtime-config';
+import { getPulseConsent, subscribePulseConsent } from './pulse-consent';
 
 /** Route definitions are a telemetry allowlist: never add user identifiers or arbitrary paths. */
 export const pulseScreenName = createScreenNameMapper(
@@ -43,6 +44,7 @@ export const pulseScreenName = createScreenNameMapper(
 );
 
 export function beforeSendPulse(event: LogEvent, { originalException: error }: PulseEventHint): LogEvent | null {
+  if (getPulseConsent() !== 'accepted') return null;
   if (shouldDropCapturedExceptionFromSentry(error)) return null;
   if (error instanceof AppError) {
     // Keep only reviewed operational metadata; never spread the error or its context.
@@ -62,6 +64,7 @@ export function beforeSendPulse(event: LogEvent, { originalException: error }: P
 }
 
 export function initPulse(): void {
+  if (getPulseConsent() !== 'accepted') return;
   try {
     Pulse.init({
       apiKey: getPulseClientKey(),
@@ -90,4 +93,22 @@ export function initPulse(): void {
   } catch {
     // Runtime-config getters run before the SDK's safe init and must not break startup.
   }
+}
+
+/** Install the consent gate before any application code can start tracking. */
+export function initializePulseConsent(): () => void {
+  let started = false;
+  const sync = () => {
+    if (getPulseConsent() === 'accepted') {
+      if (!started) initPulse();
+      started = true;
+    } else if (started) {
+      // shutdown() flushes. Disable synchronously to discard pending sends and remove collectors.
+      Pulse.init({ enabled: false });
+      started = false;
+    }
+  };
+  const unsubscribe = subscribePulseConsent(sync);
+  sync();
+  return unsubscribe;
 }

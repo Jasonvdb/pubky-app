@@ -83,6 +83,13 @@ optionally overrides the SDK's hosted endpoint. Pulse collects anonymous session
 origin-only network timing and errors scrubbed by the same redaction/drop policy as Sentry; never
 bodies, replay, raw error context or identified users.
 
+With a client key configured, an analytics banner asks each browser for consent before Pulse
+initializes or stores an identifier. Accept/decline is stored separately as `pubky-pulse-consent-v1`.
+Users can withdraw in **Settings → Privacy and Safety** or the **Analytics settings** button
+(also available to guests). Withdrawal stops collection and pending sends; it does not delete
+previously collected data. Without a key, neither the banner nor analytics controls appear.
+Only consented visits are measured, so analytics are a partial, self-selected view of usage.
+
 ### Why a separate mechanism
 
 Next.js inlines every literal `process.env.NEXT_PUBLIC_*` reference at **build time** (even in server code). A value baked into the image cannot change per environment. To make these values runtime-configurable we read **non-`NEXT_PUBLIC_` env names** (`PUBKY_RUNTIME_*`) on the server at request time and inject them into the HTML.

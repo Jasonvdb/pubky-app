@@ -9,6 +9,7 @@ import { resetRuntimeConfigForTests, RUNTIME_CONFIG_WINDOW_KEY } from '@/libs/ru
 import { NETWORK_RUNTIME_DEFAULTS } from '@/libs/runtime-config/runtime-config.schema';
 import { PUBKY_52_STAGING_FIXTURE as PUBLIC_KEY } from '@/test-utils/pubky';
 import { beforeSendPulse, initPulse, pulseScreenName } from './pulse';
+import { PULSE_CONSENT_KEY } from './pulse-consent';
 
 // Fresh module registry so the SDK mock below reaches error.factories, already imported by env.ts.
 vi.hoisted(() => vi.resetModules());
@@ -49,19 +50,21 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetRuntimeConfigForTests();
   inject();
+  localStorage.setItem(PULSE_CONSENT_KEY, 'accepted');
 });
 
 afterEach(() => {
   Env.NODE_ENV = 'production';
   delete window[RUNTIME_CONFIG_WINDOW_KEY];
   resetRuntimeConfigForTests();
+  localStorage.removeItem(PULSE_CONSENT_KEY);
 });
 
 describe('optional Pulse initialization', () => {
-  it('passes absent opt-in settings as undefined so the SDK stays disabled', () => {
+  it('never initializes without a configured client key', () => {
     inject({ pulseClientKey: undefined, pulseEndpoint: undefined });
     initPulse();
-    expect(Pulse.init).toHaveBeenCalledWith(expect.objectContaining({ apiKey: undefined, endpoint: undefined }));
+    expect(Pulse.init).not.toHaveBeenCalled();
   });
   it('wires app configuration, privacy hooks and the existing ignore policy', () => {
     initPulse();
