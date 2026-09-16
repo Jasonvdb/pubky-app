@@ -146,7 +146,7 @@ Post and user subscriptions are both reference counted, so nested surfaces that 
 | `CollectionHero`                    | the collection id    | The single-collection page's subscriber for its envelope                           |
 | `ProfilePageHeader`, `UserListItem` | the user pubky       | Profile header and user lists                                                      |
 
-The collection envelope (`name`, `description`, `cover_image`, `items`, `layout`) is one cached post row, so a single refresh updates the title, cover, and item count everywhere at once. For signed-in viewers, the single-collection item grid mirrors the envelope's `items` in place (`TimelineFeedContent`'s `membershipPostIds`): only loaded ids the membership contains are rendered, members the settled stream never delivered are prepended once as optimistic posts, and removed ids are committed out, so the grid tracks the same array the count badge renders without refetching the (asynchronously re-indexed) Nexus items stream. Owners are excluded — their own flows already update the grid optimistically, and mirroring their local envelope writes would race those flows (for example the save picker's close-gated removal). Guests are excluded too: the coordinator does not run for them, so their cached envelope must not filter the live stream.
+The collection envelope (`name`, `description`, `cover_image`, `items`, `layout`) is one cached post row, so a single refresh updates the title, cover, and item count everywhere at once. For every viewer except the owner, signed in or not, the single-collection item grid mirrors the envelope's `items` in place (`TimelineFeedContent`'s `membershipPostIds`): only loaded ids the membership contains are rendered, members the settled stream never delivered are prepended once as optimistic posts, and removed ids are committed out, so the grid tracks the same array the count badge renders without refetching the (asynchronously re-indexed) Nexus items stream. Guests are included because the coordinator refreshes public data for them too (ADR-0020), so their count badge moves and the grid must follow. Owners are excluded — their own flows already update the grid optimistically, and mirroring their local envelope writes would race those flows (for example the save picker's close-gated removal).
 
 ## Pipes Normalization (ADR-0006)
 
@@ -236,6 +236,10 @@ return SettingsNormalizer.from(settingsJson);
 ## Data Model Reference
 
 All tables defined in `src/core/database/franky/franky.ts`.
+
+### Schema changes
+
+`franky.ts` declares a single `this.version(DB_VERSION).stores({...})`; there is no incremental migration chain. `DB_VERSION` is `Env.NEXT_PUBLIC_DB_VERSION` (`src/config/database.ts`). When the stored version differs, the client deletes and recreates the local database (`recreateDatabase`), which is user-visible local data loss until the next sync. Bumping `DB_VERSION` or changing a table's index map is therefore a deliberate, reviewed change with its own callout in the PR, never a side effect of a feature. See `docs/adr/0019-dexie-recreate-on-version-mismatch.md` (supersedes ADR-0007).
 
 ### User Tables
 

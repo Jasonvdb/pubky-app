@@ -29,12 +29,13 @@ import type {
   TPersistPostsParams,
   TPostDetailsTimestampParams,
   TPostStreamBulkParams,
-  TPostStreamPersistResult,
   TPostStreamUpsertParams,
   TPrependToStreamParams,
   TStreamResult,
 } from '@/services/local/stream/posts/post.types';
-import type { NexusFileDetails, NexusPostCounts, NexusPostRelationships, NexusTag } from '@/services/nexus/nexus.types';
+import { LocalTagCacheService, type TagPreviewGuard } from '@/services/local/tag/tag-cache';
+import type { NexusPostCounts, NexusPostRelationships, NexusTag } from '@/services/nexus/nexus.types';
+import { getNexusResponseStartedAt } from '@/services/nexus/nexus.utils';
 import { StreamSource } from '@/services/nexus/stream/posts/postStream.types';
 import { sortPostIdsByTimestamp } from '@/utils/sorting';
 
@@ -221,17 +222,20 @@ export class LocalStreamPostsService {
    * - Post counts (likes, replies, etc.)
    * - Post relationships (replies, reposts, etc.)
    * - Post tags
-   * - Post attachments
    *
    * Additionally, creates reply streams for posts that are replies to other posts,
    * mapping parent posts to their reply post IDs.
    *
    * @param posts - Array of posts from Nexus API to persist
-   * @returns Object containing an array of all post attachment URIs collected from the posts
    */
-  static async persistPosts({ posts, refreshGuard }: TPersistPostsParams): Promise<TPostStreamPersistResult> {
+  static async persistPosts({
+    posts,
+    refreshGuard,
+    tagGuard = {},
+  }: TPersistPostsParams & { tagGuard?: TagPreviewGuard }): Promise<void> {
+    tagGuard = { ...tagGuard, validatedAt: tagGuard.validatedAt ?? getNexusResponseStartedAt(posts) };
     // Defensive check: if posts is empty or undefined, return early
-    if (!posts?.length) return { attachmentMetadata: [] };
+    if (!posts?.length) return;
 
     const postCounts: NexusModelTuple<NexusPostCounts>[] = [];
     const postRelationships: NexusModelTuple<NexusPostRelationships>[] = [];
@@ -242,7 +246,6 @@ export class LocalStreamPostsService {
     const postTtl: NexusModelTuple<{ lastUpdatedAt: number }>[] = [];
 
     const postReplies: Record<ReplyStreamCompositeId, string[]> = {};
-    const attachmentMetadata: NexusFileDetails[] = [];
     const now = Date.now();
 
     for (const post of posts) {
@@ -252,11 +255,6 @@ export class LocalStreamPostsService {
       postCounts.push([postId, post.counts]);
 
       postRelationships.push([postId, post.relationships]);
-      if (post.attachments_metadata) {
-        post.attachments_metadata.forEach((metadata) => {
-          attachmentMetadata.push(metadata);
-        });
-      }
 
       // Collect bookmarks from Nexus response (viewer's bookmark status).
       //
@@ -376,10 +374,11 @@ export class LocalStreamPostsService {
         const liveBookmarks = postBookmarks.filter((b) => !tombstonedIds.has(b.id));
         const liveModerations = postModerations.filter((m) => !tombstonedIds.has(m.id));
 
+        if (tagGuard.isCurrent && !tagGuard.isCurrent()) return;
         await Promise.all([
           PostDetailsModel.bulkSave(liveDetails),
-          PostCountsModel.bulkSave(liveCounts),
-          PostTagsModel.bulkSave(liveTags),
+          // Tag previews and counts share one revision-guarded write; it joins this transaction.
+          LocalTagCacheService.savePreviews('post', liveTags, tagGuard, liveCounts),
           PostRelationshipsModel.bulkSave(liveRelationships),
           PostTtlModel.bulkSave(liveTtl),
           // Persist bookmarks from Nexus (viewer's bookmark status for each post)
@@ -400,7 +399,6 @@ export class LocalStreamPostsService {
         }),
       );
     }
-    return { attachmentMetadata };
   }
 
   /**
