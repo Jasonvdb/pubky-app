@@ -84,8 +84,12 @@ origin-only failed network requests and errors scrubbed by the same redaction/dr
 never bodies, replay, raw error context, successful-request timings or identified users.
 
 With a client key configured, an analytics banner asks each browser for consent before Pulse
-initializes or stores an identifier. Accept/decline is stored separately as `pubky-pulse-consent-v1`.
-Users can withdraw in **Settings → Privacy and Safety** or the **Analytics settings** button
+initializes or stores an identifier. Accept/decline is stored separately as `pubky-pulse-consent-v1`,
+and accepting also stores the acceptance time as `pubky-pulse-consent-v1-granted-at`, which each tab
+mirrors in a `sessionStorage` marker naming the consent its own Pulse state started under. Neither is
+an identifier and neither is sent; they only let a tab that was suspended or away during a withdrawal
+notice it on its next run and delete its state then. Re-accepting starts a new anonymous browser in
+every tab. Users can withdraw in **Settings → Privacy and Safety** or the **Analytics settings** button
 (also available to guests). Withdrawal stops collection without flushing and deletes the anonymous ID,
 session and any queued events from this browser; it does not delete data the server already received.
 Without a key, neither the banner nor analytics controls appear.

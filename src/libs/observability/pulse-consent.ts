@@ -2,6 +2,10 @@ import { getPulseClientKey } from '@/libs/runtime-config/runtime-config';
 
 // Version the choice when the disclosed purposes change. This is not an analytics identifier.
 export const PULSE_CONSENT_KEY = 'pubky-pulse-consent-v1';
+// When consent was last given: written only by accepting, never sent, and not an analytics identifier.
+// It lets a tab that slept through a withdrawal and a re-acceptance see that its Pulse state predates
+// the current consent, which re-reading the choice alone can never reveal.
+export const PULSE_CONSENT_GRANTED_AT_KEY = 'pubky-pulse-consent-v1-granted-at';
 const CONSENT_CHANGED = 'pubky-pulse-consent-changed';
 export type PulseConsent = 'accepted' | 'declined' | 'unavailable' | null;
 let declinedInMemory = false;
@@ -22,10 +26,26 @@ export function getPulseConsent(): PulseConsent {
   }
 }
 
+/** The acceptance time, '' when it is absent or unreadable. Never sent; it only orders consents. */
+export function getPulseConsentGeneration(): string {
+  try {
+    return window.localStorage.getItem(PULSE_CONSENT_GRANTED_AT_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export function setPulseConsent(accepted: boolean): boolean {
   declinedInMemory = !accepted;
   let saved = false;
   try {
+    if (accepted) {
+      // Strictly increasing, so a same-millisecond re-acceptance or a clock rollback still reads as newer.
+      const previous = Number(window.localStorage.getItem(PULSE_CONSENT_GRANTED_AT_KEY));
+      const next = Math.max(Date.now(), Number.isSafeInteger(previous) ? previous + 1 : 0);
+      // Stamp before the choice: no tab may ever read 'accepted' beside an older acceptance time.
+      window.localStorage.setItem(PULSE_CONSENT_GRANTED_AT_KEY, String(next));
+    }
     window.localStorage.setItem(PULSE_CONSENT_KEY, accepted ? 'accepted' : 'declined');
     saved = true;
   } catch {
@@ -42,7 +62,8 @@ export function setPulseConsent(accepted: boolean): boolean {
 
 export function subscribePulseConsent(onChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
-    if (event.key !== null && event.key !== PULSE_CONSENT_KEY) return;
+    // Browsers fire no storage event for a same-value write, so a repeated Accept changes only the stamp.
+    if (event.key !== null && event.key !== PULSE_CONSENT_KEY && event.key !== PULSE_CONSENT_GRANTED_AT_KEY) return;
     declinedInMemory = false;
     onChange();
   };

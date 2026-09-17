@@ -16,7 +16,38 @@ import { Env } from '@/libs/env/env';
 import { AppError } from '@/libs/error/error';
 import { sanitizeForSentry, shouldDropCapturedExceptionFromSentry } from '@/libs/observability/sentry.utils';
 import { getDeployEnv, getPulseClientKey, getPulseEndpoint } from '@/libs/runtime-config/runtime-config';
-import { getPulseConsent, subscribePulseConsent } from './pulse-consent';
+import { getPulseConsent, getPulseConsentGeneration, subscribePulseConsent } from './pulse-consent';
+
+// Which consent this tab's Pulse state was created under. It lives in sessionStorage so it is copied and
+// discarded with the SDK's per-tab session keys, and it must not carry the SDK's "pulse." prefix or
+// Pulse.reset() would purge it. It records an ordering, never an identifier, and is never sent.
+const PULSE_STARTED_UNDER_KEY = 'pubky-pulse-consent-v1-started-under';
+// An unreadable marker can never equal a consent generation, so the state counts as stale.
+const UNREADABLE_GENERATION = 'unreadable';
+
+function getStartedUnder(): string | null {
+  try {
+    return window.sessionStorage.getItem(PULSE_STARTED_UNDER_KEY);
+  } catch {
+    return UNREADABLE_GENERATION;
+  }
+}
+
+function setStartedUnder(generation: string | null): boolean {
+  try {
+    if (generation === null) window.sessionStorage.removeItem(PULSE_STARTED_UNDER_KEY);
+    else window.sessionStorage.setItem(PULSE_STARTED_UNDER_KEY, generation);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True once this tab's Pulse state outlives the consent it was created under. An absent marker is a fresh tab. */
+function predatesCurrentConsent(): boolean {
+  const startedUnder = getStartedUnder();
+  return startedUnder !== null && startedUnder !== getPulseConsentGeneration();
+}
 
 /** Route definitions are a telemetry allowlist: never add user identifiers or arbitrary paths. */
 export const pulseScreenName = createScreenNameMapper(
@@ -44,7 +75,7 @@ export const pulseScreenName = createScreenNameMapper(
 );
 
 export function beforeSendPulse(event: LogEvent, { originalException: error }: PulseEventHint): LogEvent | null {
-  if (getPulseConsent() !== 'accepted') return null;
+  if (getPulseConsent() !== 'accepted' || predatesCurrentConsent()) return null;
   if (shouldDropCapturedExceptionFromSentry(error)) return null;
   if (error instanceof AppError) {
     // Keep only reviewed operational metadata; never spread the error or its context.
@@ -99,17 +130,24 @@ export function initPulse(): void {
 
 /** Install the consent gate before any application code can start tracking. */
 export function initializePulseConsent(): () => void {
-  let started = false;
+  let running = false; // this page has a live client; the marker outlives the page and cannot say so
   const sync = () => {
-    if (getPulseConsent() === 'accepted') {
-      if (!started) initPulse();
-      started = true;
-    } else if (started) {
+    const accepted = getPulseConsent() === 'accepted';
+    if (!accepted || predatesCurrentConsent()) {
       // reset() disables synchronously without flushing, removes collectors and deletes the anonymous ID,
       // session and queued events the banner asked consent to store, so nothing replays on re-acceptance.
+      // It also runs on a page that never started Pulse: a returning tab still holds the session a previous
+      // page stored, and no other tab can delete it.
       Pulse.reset();
-      started = false;
+      setStartedUnder(null);
+      running = false;
     }
+    if (!accepted || running) return;
+    // Record the provenance before starting, so "SDK state present, marker absent" cannot exist and the
+    // events init() records synchronously are not dropped by beforeSendPulse.
+    if (!setStartedUnder(getPulseConsentGeneration())) return;
+    initPulse();
+    running = true;
   };
   const unsubscribe = subscribePulseConsent(sync);
   sync();
