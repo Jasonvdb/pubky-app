@@ -79,9 +79,10 @@ The contract has three tiers:
 
 Pulse browser telemetry is opt-in: set the public, write-only `PUBKY_RUNTIME_PULSE_CLIENT_KEY`
 (`pulse_client_…`, never an admin key); omit it for zero Pulse tracking. `PUBKY_RUNTIME_PULSE_ENDPOINT`
-optionally overrides the SDK's hosted endpoint. Pulse collects anonymous sessions, route templates,
-origin-only failed network requests and errors scrubbed by the same redaction/drop policy as Sentry;
-never bodies, replay, raw error context, successful-request timings or identified users.
+optionally overrides the SDK's hosted endpoint. Pulse collects anonymous sessions, route templates and
+errors scrubbed by the same redaction/drop policy as Sentry; never bodies, replay, raw error context,
+request timings or identified users. Network failures arrive as application errors through that same
+policy — the SDK's fetch-level network tracking is off, because its events bypass the drop rules.
 
 With a client key configured, an analytics banner asks each browser for consent before Pulse
 initializes or stores an identifier. Accept/decline is stored separately as `pubky-pulse-consent-v1`,

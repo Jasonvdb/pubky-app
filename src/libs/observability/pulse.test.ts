@@ -88,10 +88,13 @@ describe('optional Pulse initialization', () => {
         /Java exception was raised during method invocation/,
         /Failed to connect to MetaMask/,
       ],
-      networkTracking: { urlMode: 'origin', sampleRate: 0 },
       screenNameForPath: pulseScreenName,
       beforeSend: beforeSendPulse,
     });
+  });
+  it('never enables SDK network tracking, whose events bypass the shared drop policy', () => {
+    initPulse();
+    expect(vi.mocked(Pulse.init).mock.calls[0][0]).not.toHaveProperty('networkTracking');
   });
   it('marks production deploys as non-development', () => {
     inject({ deployEnv: 'production' });

@@ -117,9 +117,8 @@ export function initPulse(): void {
         /Java exception was raised during method invocation/,
         /Failed to connect to MetaMask/,
       ],
-      // Failures only: rejected fetches pass through ignoreErrors and drop to warn while offline; successful
-      // requests are sampled per session and nothing consumes their timings yet.
-      networkTracking: { urlMode: 'origin', sampleRate: 0 },
+      // No networkTracking: network failures reach Pulse as AppErrors, so they pass the shared drop policy
+      // that the SDK's fetch-level tracking cannot apply.
       screenNameForPath: pulseScreenName,
       beforeSend: beforeSendPulse,
     });
