@@ -8,13 +8,15 @@ vi.mock('@/libs/runtime-config/runtime-config', () => ({ getPulseClientKey: () =
 
 beforeEach(() => {
   config.key = 'pulse_client_test';
+  // Reset the in-memory refusal fallback using the public choice API, then start from empty storage:
+  // accepting also writes the acceptance time, which must not leak into the next test.
   setPulseConsent(true);
-  localStorage.removeItem(PULSE_CONSENT_KEY);
+  localStorage.clear();
 });
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  localStorage.removeItem(PULSE_CONSENT_KEY);
+  localStorage.clear();
 });
 
 describe('Pulse consent', () => {

@@ -23,10 +23,12 @@ function sentPayloads(): string {
     .join('\n');
 }
 
+function storedKeys(store: Storage): string[] {
+  return Array.from({ length: store.length }, (_, index) => store.key(index) ?? '');
+}
+
 function sdkKeys(store: Storage): string[] {
-  return Array.from({ length: store.length }, (_, index) => store.key(index) ?? '').filter((key) =>
-    key.startsWith('pulse.'),
-  );
+  return storedKeys(store).filter((key) => key.startsWith('pulse.'));
 }
 
 /** Accepting stamps a strictly increasing time, so a same-millisecond re-acceptance still reads as newer. */
@@ -73,6 +75,7 @@ beforeEach(() => {
   // Reset the in-memory refusal fallback using the public choice API.
   setPulseConsent(true);
   localStorage.removeItem(PULSE_CONSENT_KEY);
+  localStorage.removeItem(PULSE_CONSENT_GRANTED_AT_KEY);
   requests.mockReset().mockResolvedValue(new Response('{}', { status: 200 }));
   vi.stubGlobal('fetch', requests);
 });
@@ -102,6 +105,14 @@ describe('consent gate with the real Pulse SDK', () => {
     },
   );
 
+  it('stores nothing but the refusal when consent is declined', () => {
+    setPulseConsent(false);
+    // Declining must leave no acceptance time behind: a visitor who never said yes stores only the refusal.
+    expect(localStorage.getItem(PULSE_CONSENT_GRANTED_AT_KEY)).toBeNull();
+    expect(storedKeys(localStorage)).toEqual([PULSE_CONSENT_KEY]);
+    expect(storedKeys(sessionStorage)).toEqual([]);
+  });
+
   it.each([undefined, '', '   '])(
     'never starts with an absent/blank key, even with saved consent (%s)',
     async (key) => {
@@ -123,6 +134,9 @@ describe('consent gate with the real Pulse SDK', () => {
     await Pulse.flush();
     expect(requests).toHaveBeenCalled();
     expect(sentPayloads()).toContain('Consented error');
+    // The events init() records synchronously must survive the gate: the marker naming this tab's consent
+    // is written before init, so the session start is never dropped as state predating the current choice.
+    expect(sentPayloads()).toContain('sdk:session_started');
     requests.mockClear();
     Pulse.captureException(new Error('Pending before withdrawal'));
     setPulseConsent(false);
