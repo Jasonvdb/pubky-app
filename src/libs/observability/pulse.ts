@@ -17,12 +17,27 @@ import {
   ROOT_ROUTES,
   SETTINGS_ROUTES,
 } from '@/app/routes';
-import { INLINE_IMAGE_UPLOAD_REJECTION_NAME } from '@/hooks/useInlineImageUpload/useInlineImageUpload.types';
 import { Env } from '@/libs/env/env';
 import { AppError } from '@/libs/error/error';
+import { OBSERVABILITY_IGNORE_ERRORS } from '@/libs/observability/sentry.constants';
 import { sanitizeForSentry, shouldDropCapturedExceptionFromSentry } from '@/libs/observability/sentry.utils';
 import { getDeployEnv, getPulseClientKey, getPulseEndpoint } from '@/libs/runtime-config/runtime-config';
 import { getPulseConsent, getPulseConsentGeneration, subscribePulseConsent } from './pulse-consent';
+
+/**
+ * Pulse browser SDK wiring: the consent gate, the `Pulse.init()` options, and `beforeSendPulse`.
+ *
+ * As for Sentry, do NOT import @synonymdev/pubky-pulse-web outside:
+ * - This file (init + beforeSend)
+ * - app/error.tsx and app/global-error.tsx (the React error boundaries)
+ * - error.factories.ts (the one AppError capture call)
+ *
+ * There is deliberately no `capturePulseException` funnel mirroring `captureAppError`: the SDK runs
+ * `beforeSendPulse` on every path — factory captures, boundary captures and its own unhandled handlers —
+ * so it is already the single policy point, and a wrapper could only repeat it for the one path it sits
+ * on. error.factories.ts could not route through this module in any case: pulse.ts → env.ts →
+ * error.factories.ts would close a second arm on the init cycle sentry.ts guards against.
+ */
 
 // Which consent this tab's Pulse state was created under. It lives in sessionStorage so it is copied and
 // discarded with the SDK's per-tab session keys, and it must not carry the SDK's "pulse." prefix or
@@ -119,19 +134,8 @@ export function initPulse(): PulseInitResult | null {
       // banner names them; the language pair goes, because `locale` and `preferred_language` are both
       // `navigator.language`, the app ships one language and never sets `supportedLanguages`.
       deviceInfo: { os: true, browser: true, language: false },
-      ignoreErrors: [
-        'ResizeObserver loop limit exceeded',
-        'ResizeObserver loop completed with undelivered notifications',
-        'Failed to fetch',
-        /Loading chunk \d+ failed/,
-        'AbortError',
-        'Non-Error promise rejection captured',
-        INLINE_IMAGE_UPLOAD_REJECTION_NAME,
-        /window\.webkit\.messageHandlers/,
-        /Java object is gone/,
-        /Java exception was raised during method invocation/,
-        /Failed to connect to MetaMask/,
-      ],
+      // The same list Sentry spreads, so the two sinks cannot drift onto different noise policies.
+      ignoreErrors: [...OBSERVABILITY_IGNORE_ERRORS],
       // No networkTracking: network failures reach Pulse as AppErrors, so they pass the shared drop policy
       // that the SDK's fetch-level tracking cannot apply.
       screenNameForPath: pulseScreenName,

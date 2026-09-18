@@ -79,6 +79,7 @@ See [React 19's `onRecoverableError` docs](https://react.dev/reference/react-dom
 - `src/instrumentation-client.ts` — browser init + Replay + `onRouterTransitionStart`
 - `src/sentry.server.config.ts` / `src/sentry.edge.config.ts` — runtime-specific init
 - `src/libs/observability/sentry.ts` — single source of truth (`shouldEnableSentry`, `getSentryInitBase`, `captureAppError`). Sentry is off when `NODE_ENV=test`, `VITEST` is set, the **runtime** config has `testnet=true`, or no **runtime** DSN is configured. If the runtime config cannot be resolved at all, the gate returns `false` instead of throwing (the capture funnel must never mask the original boot error).
+- `src/libs/observability/sentry.constants.ts` — `OBSERVABILITY_IGNORE_ERRORS`, the one noise policy both Sentry and the optional Pulse sink spread into their SDK `ignoreErrors`; add a pattern here, never in a single initializer
 - `src/libs/error/error.factories.ts` — `createAppError()` calls `captureAppError(error)` after `Logger.error`
 - `next.config.ts` — wrapped by `withSentryConfig(...)` for SDK wiring only; source-map upload is disabled (see below)
 

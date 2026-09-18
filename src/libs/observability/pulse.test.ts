@@ -1,6 +1,5 @@
 import { type LogEvent, Pulse } from '@synonymdev/pubky-pulse-web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INLINE_IMAGE_UPLOAD_REJECTION_NAME } from '@/hooks/useInlineImageUpload/useInlineImageUpload.types';
 import { Env } from '@/libs/env/env';
 import { ClientErrorCode, ServerErrorCode } from '@/libs/error/error.codes';
 import { Err } from '@/libs/error/error.factories';
@@ -10,6 +9,7 @@ import { NETWORK_RUNTIME_DEFAULTS } from '@/libs/runtime-config/runtime-config.s
 import { PUBKY_52_STAGING_FIXTURE as PUBLIC_KEY } from '@/test-utils/pubky';
 import { beforeSendPulse, initPulse, pulseScreenName } from './pulse';
 import { PULSE_CONSENT_KEY } from './pulse-consent';
+import { OBSERVABILITY_IGNORE_ERRORS } from './sentry.constants';
 
 // Fresh module registry so the SDK mock below reaches error.factories, already imported by env.ts.
 vi.hoisted(() => vi.resetModules());
@@ -71,7 +71,7 @@ describe('optional Pulse initialization', () => {
     initPulse();
     expect(Pulse.init).not.toHaveBeenCalled();
   });
-  it('wires app configuration, privacy hooks and the existing ignore policy', () => {
+  it('wires app configuration, privacy hooks and the ignore policy shared with Sentry', () => {
     initPulse();
     expect(Pulse.init).toHaveBeenCalledExactlyOnceWith({
       apiKey: 'pulse_client_local_test_only',
@@ -81,19 +81,7 @@ describe('optional Pulse initialization', () => {
       isDev: true,
       consoleLogging: false,
       deviceInfo: { os: true, browser: true, language: false },
-      ignoreErrors: [
-        'ResizeObserver loop limit exceeded',
-        'ResizeObserver loop completed with undelivered notifications',
-        'Failed to fetch',
-        /Loading chunk \d+ failed/,
-        'AbortError',
-        'Non-Error promise rejection captured',
-        INLINE_IMAGE_UPLOAD_REJECTION_NAME,
-        /window\.webkit\.messageHandlers/,
-        /Java object is gone/,
-        /Java exception was raised during method invocation/,
-        /Failed to connect to MetaMask/,
-      ],
+      ignoreErrors: [...OBSERVABILITY_IGNORE_ERRORS],
       screenNameForPath: pulseScreenName,
       beforeSend: beforeSendPulse,
     });
