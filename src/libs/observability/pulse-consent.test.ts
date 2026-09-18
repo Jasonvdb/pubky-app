@@ -2,7 +2,13 @@ import { gunzipSync } from 'node:zlib';
 import { Pulse } from '@synonymdev/pubky-pulse-web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { beforeSendPulse, initializePulseConsent, initPulse } from './pulse';
-import { getPulseConsent, PULSE_CONSENT_GRANTED_AT_KEY, PULSE_CONSENT_KEY, setPulseConsent } from './pulse-consent';
+import {
+  getPulseConsent,
+  getPulseConsentSaveFailed,
+  PULSE_CONSENT_GRANTED_AT_KEY,
+  PULSE_CONSENT_KEY,
+  setPulseConsent,
+} from './pulse-consent';
 
 const config = vi.hoisted(() => ({ key: 'pulse_client_test' as string | undefined, testnet: false }));
 vi.mock('@/libs/env/env', () => ({ Env: { NODE_ENV: 'production', NEXT_PUBLIC_APP_VERSION: 'test' } }));
@@ -324,6 +330,19 @@ describe('consent gate with the real Pulse SDK', () => {
     await Pulse.flush();
     expect(Pulse.currentUserId).toMatch(/^pulse_anon_/);
     expect(Pulse.currentUserId).not.toBe(firstId);
+  });
+
+  it('stops reporting a failed write once another tab stores a choice', () => {
+    unsubscribe = initializePulseConsent();
+    const blocked = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Blocked');
+    });
+    expect(setPulseConsent(true)).toBe(false);
+    expect(getPulseConsentSaveFailed()).toBe(true);
+    blocked.mockRestore();
+    otherTabAccepts();
+    deliverStorageEvent(PULSE_CONSENT_KEY);
+    expect(getPulseConsentSaveFailed()).toBe(false);
   });
 
   it('resyncs when only the acceptance time changed', async () => {

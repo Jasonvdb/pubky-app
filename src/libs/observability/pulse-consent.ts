@@ -9,6 +9,10 @@ export const PULSE_CONSENT_GRANTED_AT_KEY = 'pubky-pulse-consent-v1-granted-at';
 const CONSENT_CHANGED = 'pubky-pulse-consent-changed';
 export type PulseConsent = 'accepted' | 'declined' | 'unavailable' | null;
 let declinedInMemory = false;
+// The last write failed, so the choice is stored nowhere. This belongs beside the choice rather than in a
+// component: the banner and the Privacy switch are separate hook instances, and a write that does store a
+// choice makes the error describe nothing, wherever it came from.
+let saveFailed = false;
 
 export function getPulseConsent(): PulseConsent {
   try {
@@ -27,6 +31,11 @@ export function getPulseConsent(): PulseConsent {
     // Storage failures never imply consent.
     return null;
   }
+}
+
+/** Whether this tab's last consent write failed. Cleared by the next write that does store a choice. */
+export function getPulseConsentSaveFailed(): boolean {
+  return saveFailed;
 }
 
 /** The acceptance time, '' when it is absent or unreadable. Never sent; it only orders consents. */
@@ -59,6 +68,8 @@ export function setPulseConsent(accepted: boolean): boolean {
       // Keep this page opted out even if the previous choice cannot be removed.
     }
   }
+  // Before the notification: subscribers re-read their snapshots while it is dispatched.
+  saveFailed = !saved;
   window.dispatchEvent(new Event(CONSENT_CHANGED));
   return saved;
 }
@@ -68,6 +79,8 @@ export function subscribePulseConsent(onChange: () => void): () => void {
     // Browsers fire no storage event for a same-value write, so a repeated Accept changes only the stamp.
     if (event.key !== null && event.key !== PULSE_CONSENT_KEY && event.key !== PULSE_CONSENT_GRANTED_AT_KEY) return;
     declinedInMemory = false;
+    // Another tab stored a choice for this origin, so this page's failure no longer describes the storage.
+    saveFailed = false;
     onChange();
   };
   window.addEventListener(CONSENT_CHANGED, onChange);

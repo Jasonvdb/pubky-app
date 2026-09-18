@@ -116,6 +116,25 @@ describe('Pulse consent', () => {
     expect(screen.queryByRole('region', { name: 'Analytics consent' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Analytics settings' })).toBeInTheDocument();
   });
+
+  it('clears the save error once another control stores the choice', () => {
+    render(
+      <>
+        <PulseConsentBanner />
+        <PulseConsentSettings />
+      </>,
+    );
+    const blocked = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Blocked');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+    // Nothing is stored, so both controls say so: the failure is a fact about the tab, not about one of them.
+    expect(screen.getAllByRole('alert')).toHaveLength(2);
+    blocked.mockRestore();
+    fireEvent.click(screen.getByRole('switch', { name: 'Optional analytics' }));
+    expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('accepted');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });
 
 describe('PulseConsent - Snapshots', () => {
