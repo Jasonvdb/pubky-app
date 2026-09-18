@@ -55,8 +55,51 @@ function otherTabAccepts(after?: string | null): void {
   localStorage.setItem(PULSE_CONSENT_KEY, 'accepted');
 }
 
+/** Only the refusal reaches this tab, so nothing was deleted for it and its own cleanup has to show. */
 function otherTabDeclines(): void {
   localStorage.setItem(PULSE_CONSENT_KEY, 'declined');
+}
+
+/**
+ * A real withdrawal elsewhere: that tab runs the same gate, so its browser-wide Pulse.reset() also
+ * deletes the `pulse.` localStorage every tab shares. Its own sessionStorage goes with it, which in
+ * jsdom's single realm would be this tab's — the one store another tab can never reach — so it stays.
+ */
+function otherTabWithdraws(): void {
+  otherTabDeclines();
+  for (const key of sdkKeys(localStorage)) localStorage.removeItem(key);
+}
+
+/** The anonymous browser another tab started after re-accepting; this browser's only shared ID. */
+const OTHER_TAB_ANONYMOUS_ID = 'pulse_anon_00000000-0000-4000-8000-0000000000aa';
+
+/** Another tab starts over under the current consent, so the shared ID is one this tab never held. */
+function otherTabStartsOver(): void {
+  localStorage.setItem('pulse.anonymous_id', OTHER_TAB_ANONYMOUS_ID);
+}
+
+/**
+ * An event another tab recorded under the current consent and could not deliver, parked in the offline
+ * queue every tab shares. Whichever tab flushes next drains it; a browser-wide reset deletes it.
+ */
+function otherTabParks(message: string): void {
+  localStorage.setItem(
+    'pulse.offline_queue',
+    JSON.stringify([
+      {
+        client_event_id: '00000000-0000-4000-8000-0000000000ab',
+        session_id: '00000000-0000-4000-8000-0000000000ac',
+        user_id: OTHER_TAB_ANONYMOUS_ID,
+        level: 'error',
+        message,
+        environment: 'web',
+        sdk_name: 'pubky-pulse-web',
+        sdk_version: '0.9.0',
+        is_dev: true,
+        timestamp: new Date().toISOString(),
+      },
+    ]),
+  );
 }
 
 /** jsdom never fires storage events for its own writes; a real second tab's write would. */
@@ -247,7 +290,7 @@ describe('consent gate with the real Pulse SDK', () => {
     expect(firstSession).toMatch(/.+/);
     Pulse.captureException(new Error('Pending before withdrawal'));
     // Both writes land while this tab is suspended, so re-reading the choice only ever shows 'accepted'.
-    otherTabDeclines();
+    otherTabWithdraws();
     otherTabAccepts();
     deliverStorageEvent(PULSE_CONSENT_KEY);
     await Pulse.flush();
@@ -265,7 +308,7 @@ describe('consent gate with the real Pulse SDK', () => {
     const firstSession = sessionStorage.getItem('pulse.session_id') ?? '';
     expect(firstSession).toMatch(/.+/);
     Pulse.captureException(new Error('Pending before withdrawal'));
-    otherTabDeclines();
+    otherTabWithdraws();
     otherTabAccepts();
     // A bfcache restore or a refocus replays no storage event for writes made while the tab was away.
     window.dispatchEvent(new Event(eventName));
@@ -275,6 +318,52 @@ describe('consent gate with the real Pulse SDK', () => {
     expect(sessionStorage.getItem('pulse.session_id')).not.toBe(firstSession);
     expect(sentPayloads()).not.toContain('Pending before withdrawal');
     expect(sentPayloads()).not.toContain(firstSession);
+  });
+
+  it.each([
+    [
+      'a fresh page',
+      () => {
+        leavePage();
+        returnToPage();
+      },
+    ],
+    ['the live client', () => window.dispatchEvent(new Event('focus'))],
+  ])("keeps another tab's current-consent events when reconciling on %s", async (_where, reconcile) => {
+    unsubscribe = initializePulseConsent();
+    setPulseConsent(true);
+    const staleSession = sessionStorage.getItem('pulse.session_id') ?? '';
+    expect(staleSession).toMatch(/.+/);
+    Pulse.captureException(new Error('Recorded under the old consent'));
+    // All of this lands while this tab is suspended: another tab withdraws, accepts again, starts over
+    // as a new anonymous browser and parks an event it could not deliver in the shared offline queue.
+    otherTabWithdraws();
+    otherTabAccepts();
+    otherTabStartsOver();
+    otherTabParks('Parked under the current consent');
+    requests.mockClear();
+    reconcile();
+    await Pulse.flush();
+    // Cleaning up this tab must not take the state the freshly consented tabs share: their event is
+    // still deliverable, and this tab joins the anonymous browser they are already using.
+    expect(sentPayloads()).toContain('Parked under the current consent');
+    expect(localStorage.getItem('pulse.anonymous_id')).toBe(OTHER_TAB_ANONYMOUS_ID);
+    expect(Pulse.currentUserId).toBe(OTHER_TAB_ANONYMOUS_ID);
+    // Nothing this tab held under the old consent crosses: not its session, not what it recorded.
+    expect(sessionStorage.getItem('pulse.session_id')).not.toBe(staleSession);
+    expect(sentPayloads()).not.toContain(staleSession);
+    expect(sentPayloads()).not.toContain('Recorded under the old consent');
+  });
+
+  it("delivers another tab's parked events when a brand new tab starts under the same consent", async () => {
+    otherTabAccepts();
+    otherTabStartsOver();
+    otherTabParks('Parked under the current consent');
+    // The control for the test above: a tab with no state of its own reconciles nothing and deletes nothing.
+    unsubscribe = initializePulseConsent();
+    await Pulse.flush();
+    expect(localStorage.getItem('pulse.anonymous_id')).toBe(OTHER_TAB_ANONYMOUS_ID);
+    expect(sentPayloads()).toContain('Parked under the current consent');
   });
 
   it('deletes the session a previous page stored when the tab returns after withdrawal', async () => {
@@ -298,7 +387,7 @@ describe('consent gate with the real Pulse SDK', () => {
     const firstSession = sessionStorage.getItem('pulse.session_id') ?? '';
     expect(firstSession).toMatch(/.+/);
     leavePage();
-    otherTabDeclines();
+    otherTabWithdraws();
     otherTabAccepts();
     // Startup sees 'accepted', so the withdrawal is invisible unless the stale state announces itself.
     returnToPage();
@@ -360,20 +449,23 @@ describe('consent gate with the real Pulse SDK', () => {
     unsubscribe = initializePulseConsent();
     setPulseConsent(true);
     const firstId = Pulse.currentUserId;
+    const firstSession = sessionStorage.getItem('pulse.session_id') ?? '';
     // A repeated Accept in another tab rewrites the same 'accepted' value, for which browsers fire no
     // storage event, so the acceptance time is the only change this tab can be told about.
     localStorage.setItem(PULSE_CONSENT_GRANTED_AT_KEY, nextGeneration());
     deliverStorageEvent(PULSE_CONSENT_GRANTED_AT_KEY);
     await Pulse.flush();
-    expect(Pulse.currentUserId).toMatch(/^pulse_anon_/);
-    expect(Pulse.currentUserId).not.toBe(firstId);
+    // This tab starts over, but nothing was withdrawn: no deletion was promised, the shared anonymous
+    // browser is still the consented one every other tab is using, and it stays.
+    expect(Pulse.currentUserId).toBe(firstId);
+    expect(sessionStorage.getItem('pulse.session_id')).not.toBe(firstSession);
   });
 
   it('drops events recorded after a missed withdrawal until the tab resyncs', async () => {
     unsubscribe = initializePulseConsent();
     setPulseConsent(true);
     requests.mockClear();
-    otherTabDeclines();
+    otherTabWithdraws();
     otherTabAccepts();
     // No event has reached this tab yet: the gate that runs as an event is recorded has to hold the line.
     Pulse.captureException(new Error('Recorded while stale'));

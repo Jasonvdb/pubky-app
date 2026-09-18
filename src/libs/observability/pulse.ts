@@ -153,12 +153,21 @@ export function initializePulseConsent(): () => void {
   let running = false; // this page has a live client; the marker outlives the page and cannot say so
   const sync = () => {
     const accepted = getPulseConsent() === 'accepted';
-    if (!accepted || predatesCurrentConsent()) {
-      // reset() disables synchronously without flushing, removes collectors and deletes the anonymous ID,
-      // session and queued events the banner asked consent to store, so nothing replays on re-acceptance.
-      // It also runs on a page that never started Pulse: a returning tab still holds the session a previous
-      // page stored, and no other tab can delete it.
-      Pulse.reset();
+    const stale = predatesCurrentConsent();
+    if (!accepted || stale) {
+      // Both resets disable synchronously without flushing and remove the collectors; they differ in how
+      // much they delete, and both run on a page that never started Pulse, because a returning tab still
+      // holds the session a previous page stored and no other tab can delete it.
+      //
+      // Consent is gone: delete everything this browser holds — the anonymous ID, the session and every
+      // queued event the banner asked consent to store — so nothing replays on re-acceptance. Anything
+      // still queued was recorded before the withdrawal, so nothing current is lost with it.
+      //
+      // Consent stands and only this tab is stale: delete this tab's client and session alone. The
+      // browser-wide state belongs to the current consent — another tab may already have minted the
+      // shared anonymous ID and parked events under it — and purging it here would destroy telemetry
+      // the user has consented to, from tabs that are not stale at all.
+      Pulse.reset(accepted && stale ? { scope: 'tab' } : undefined);
       setStartedUnder(null);
       running = false;
     }

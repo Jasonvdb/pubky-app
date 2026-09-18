@@ -92,8 +92,11 @@ initializes or stores an identifier. Accept/decline is stored separately as `pub
 and accepting also stores the acceptance time as `pubky-pulse-consent-v1-granted-at`, which each tab
 mirrors in a `sessionStorage` marker naming the consent its own Pulse state started under. Neither is
 an identifier and neither is sent; they only let a tab that was suspended or away during a withdrawal
-notice it on its next run and delete its state then. Re-accepting starts a new anonymous browser in
-every tab. Users can withdraw in **Settings → Privacy and Safety** or the **Pulse analytics** button
+notice it on its next run and clean up then. A withdrawal deletes the browser-wide state, so accepting
+again starts a new anonymous browser in every tab; the stale tab deletes its own client and session
+alone, because the anonymous ID and queued events it finds now belong to the current consent and other
+tabs are still using them. Events that tab had queued before it went stale stay queued and are sent by
+whichever tab flushes next. Users can withdraw in **Settings → Privacy and Safety** or the **Pulse analytics** button
 (also available to guests). Withdrawal stops collection without flushing and deletes the anonymous ID,
 session and any queued events from this browser; it does not delete data the server already received.
 Without a key — or on a testnet deploy (`PUBKY_RUNTIME_TESTNET=true`), which disables Pulse exactly as it
