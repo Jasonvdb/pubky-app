@@ -80,6 +80,7 @@ describe('optional Pulse initialization', () => {
       appVersion: 'test',
       isDev: true,
       consoleLogging: false,
+      deviceInfo: { os: true, browser: true, language: false },
       ignoreErrors: [
         'ResizeObserver loop limit exceeded',
         'ResizeObserver loop completed with undelivered notifications',
@@ -100,6 +101,10 @@ describe('optional Pulse initialization', () => {
   it('never enables SDK network tracking, whose events bypass the shared drop policy', () => {
     initPulse();
     expect(vi.mocked(Pulse.init).mock.calls[0][0]).not.toHaveProperty('networkTracking');
+  });
+  it('never collects the browser language, which nothing in the app consumes and the banner does not name', () => {
+    initPulse();
+    expect(vi.mocked(Pulse.init).mock.calls[0][0].deviceInfo).toEqual({ os: true, browser: true, language: false });
   });
   it('marks production deploys as non-development', () => {
     inject({ deployEnv: 'production' });

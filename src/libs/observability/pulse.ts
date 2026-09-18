@@ -114,6 +114,11 @@ export function initPulse(): PulseInitResult | null {
       appVersion: Env.NEXT_PUBLIC_APP_VERSION,
       isDev: Env.NODE_ENV !== 'production' || getDeployEnv() !== 'production',
       consoleLogging: false,
+      // The SDK stamps browser-derived fields on every event, all on by default. Spelled out rather than
+      // inherited: OS and browser stay because they are what makes a browser-only error actionable and the
+      // banner names them; the language pair goes, because `locale` and `preferred_language` are both
+      // `navigator.language`, the app ships one language and never sets `supportedLanguages`.
+      deviceInfo: { os: true, browser: true, language: false },
       ignoreErrors: [
         'ResizeObserver loop limit exceeded',
         'ResizeObserver loop completed with undelivered notifications',

@@ -7,7 +7,7 @@ import { usePulseConsent } from '@/hooks/usePulseConsent/usePulseConsent';
 import { SettingsSwitchItem } from '@/molecules/Settings/SettingsSwitchItem/SettingsSwitchItem';
 
 const CONSENT_DESCRIPTION =
-  'Allow Pubky Pulse to store an anonymous ID in this browser and measure how you use Pubky across visits, including page views and errors. This helps us improve the app.';
+  'Allow Pubky Pulse to store an anonymous ID in this browser and measure how you use Pubky across visits, including page views, errors, and which browser and operating system you use. This helps us improve the app.';
 const SAVE_ERROR = 'Analytics is off, but your choice could not be saved. Please check your browser storage settings.';
 
 export function PulseConsentBanner() {
