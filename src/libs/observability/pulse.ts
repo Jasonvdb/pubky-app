@@ -1,4 +1,10 @@
-import { createScreenNameMapper, type LogEvent, Pulse, type PulseEventHint } from '@synonymdev/pubky-pulse-web';
+import {
+  createScreenNameMapper,
+  type LogEvent,
+  Pulse,
+  type PulseEventHint,
+  type PulseInitResult,
+} from '@synonymdev/pubky-pulse-web';
 import {
   APP_ROUTES,
   AUTH_ROUTES,
@@ -94,10 +100,14 @@ export function beforeSendPulse(event: LogEvent, { originalException: error }: P
   return event;
 }
 
-export function initPulse(): void {
-  if (getPulseConsent() !== 'accepted') return;
+/**
+ * The SDK's init result, or null when consent stopped us before the call. Pulse.init never throws: a start
+ * that was refused or that failed is reported through the result's status, so callers must read it.
+ */
+export function initPulse(): PulseInitResult | null {
+  if (getPulseConsent() !== 'accepted') return null;
   try {
-    Pulse.init({
+    return Pulse.init({
       apiKey: getPulseClientKey(),
       endpoint: getPulseEndpoint(),
       enabled: Env.NODE_ENV !== 'test' && !Env.VITEST,
@@ -123,7 +133,9 @@ export function initPulse(): void {
       beforeSend: beforeSendPulse,
     });
   } catch {
-    // Runtime-config getters run before the SDK's safe init and must not break startup.
+    // Unreachable today: the consent check above already resolved and memoized the runtime config, and the
+    // SDK reports failures instead of throwing. Kept so a future read here can never break startup.
+    return null;
   }
 }
 
@@ -143,10 +155,14 @@ export function initializePulseConsent(): () => void {
     }
     if (!accepted || running) return;
     // Record the provenance before starting, so "SDK state present, marker absent" cannot exist and the
-    // events init() records synchronously are not dropped by beforeSendPulse.
+    // events init() records synchronously are not dropped by beforeSendPulse. The marker stays if the start
+    // then fails: it describes the Pulse state this tab may still hold from an earlier page load, and
+    // dropping it would make a stale tab look brand new and let it resume a pre-withdrawal session.
     if (!setStartedUnder(getPulseConsentGeneration())) return;
-    initPulse();
-    running = true;
+    // Only a client that actually started counts as running. A refused or failed init is retried on the next
+    // consent notification, focus or pageshow; re-initializing a live client is a no-op in the SDK, so a
+    // retry can never install a second set of collectors.
+    running = initPulse()?.status === 'enabled';
   };
   const unsubscribe = subscribePulseConsent(sync);
   sync();

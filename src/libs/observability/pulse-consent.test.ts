@@ -407,4 +407,18 @@ describe('consent gate with the real Pulse SDK', () => {
     expect(localStorage.getItem('pulse.anonymous_id')).toBeNull();
     expect(Pulse.currentUserId).toBeUndefined();
   });
+
+  it('retries on the next sync when init fails instead of reporting Pulse as running', async () => {
+    // The consent gate only requires a non-empty key, while the SDK also requires its client prefix, so a key
+    // the app accepts can still make Pulse.init report an error instead of throwing.
+    config.key = 'not_a_pulse_client_key';
+    otherTabAccepts();
+    unsubscribe = initializePulseConsent();
+    await Pulse.flush();
+    expect(Pulse.currentUserId).toBeUndefined();
+    expect(requests).not.toHaveBeenCalled();
+    config.key = 'pulse_client_test';
+    window.dispatchEvent(new Event('focus'));
+    expect(Pulse.currentUserId).toMatch(/^pulse_anon_/);
+  });
 });

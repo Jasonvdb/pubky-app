@@ -106,7 +106,7 @@ describe('optional Pulse initialization', () => {
     initPulse();
     expect(Pulse.init).toHaveBeenCalledWith(expect.objectContaining({ isDev: false }));
   });
-  it('cannot break the app when runtime-config getters fail before SDK init', () => {
+  it('never calls the SDK when the runtime config cannot be resolved', () => {
     inject({ pulseEndpoint: 'invalid' });
     expect(initPulse).not.toThrow();
     expect(Pulse.init).not.toHaveBeenCalled();
