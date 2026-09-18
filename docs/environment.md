@@ -84,8 +84,7 @@ optionally overrides the SDK's hosted ingest host (`https://ingest.pubkypulse.co
 so a deployer running their own Pulse must set it or their users' events go to Pubky's host.
 Pulse collects anonymous sessions, route templates, the
 browser and operating-system versions the SDK parses from the user agent, and errors scrubbed by the same
-redaction/drop policy as Sentry; never the browser language (`deviceInfo.language` is off, and the banner
-names what is left), bodies, replay, raw error context, request timings or identified users. Network failures arrive as application errors through that same
+redaction/drop policy as Sentry; never the browser language (`deviceInfo.language` is off), bodies, replay, raw error context, request timings or identified users. Network failures arrive as application errors through that same
 policy — the SDK's fetch-level network tracking is off, because its events bypass the drop rules.
 
 With a client key configured, an analytics banner asks each browser for consent before Pulse

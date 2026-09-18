@@ -15,11 +15,11 @@ How errors and performance data leave Pubky App. Sentry is the primary sink (bro
 | Replay (masked)                                      | `replayIntegration({ maskAllText, blockAllMedia, maskAllInputs })` on errored sessions                                                                                            | Sentry         |
 | Browser screen views                                 | Pulse `trackPageViews`, pathnames mapped to route templates by `pulseScreenName` in `src/libs/observability/pulse.ts`                                                             | Pulse          |
 
-Every `Pulse.*` call is a no-op until `Pulse.init()` runs, and it never runs outside the browser or without consent — so a `Sink` of "Sentry + Pulse" means Sentry always, Pulse only in a consenting browser.
+Every `Pulse.*` capture call is a no-op until `Pulse.init()` runs, and it never runs outside the browser or without consent — so a `Sink` of "Sentry + Pulse" means Sentry always, Pulse only in a consenting browser.
 
 ## Capture rule
 
-> Throw via `Err.*` factories. Do **not** call `Sentry.captureException` or `Pulse.captureException` directly anywhere except `app/error.tsx` and `app/global-error.tsx`, and in those two files only for non-`AppError` instances.
+> Throw via `Err.*` factories. Do **not** call `Sentry.captureException` or `Pulse.captureException` directly anywhere except the single `Pulse.captureException` inside `createAppError()` (`src/libs/error/error.factories.ts`) and the two boundaries `app/error.tsx` and `app/global-error.tsx` — and in those two files only for non-`AppError` instances.
 
 The `Err.*` factories already log once and capture once into each sink — adding extra `Sentry.captureException` or `Pulse.captureException` calls causes duplicate issues in that dashboard. Anything that bubbles to the browser global handler is captured automatically by both SDKs; the server `onRequestError` hook reaches Sentry only.
 
@@ -78,7 +78,7 @@ See [React 19's `onRecoverableError` docs](https://react.dev/reference/react-dom
 
 ## Pulse (browser-only second sink)
 
-Pulse is opt-in twice over: it does nothing without `PUBKY_RUNTIME_PULSE_CLIENT_KEY`, and nothing until the visitor accepts the analytics banner. Until `Pulse.init()` runs, every `Pulse.*` call is a silent no-op — including on the server, where the SDK never initializes, so a server-side `Err.*` reaches Sentry only. `initializePulseConsent()` in `src/libs/observability/pulse.ts` installs the gate from `src/instrumentation-client.ts` before any app code runs, and a withdrawal calls `Pulse.reset()`, which disables collection without flushing and deletes the anonymous id, session and queued events. The consent storage, the cross-tab generation marker and the user-facing controls are documented in [environment.md](environment.md).
+Pulse is opt-in twice over: it does nothing without `PUBKY_RUNTIME_PULSE_CLIENT_KEY`, and nothing until the visitor accepts the analytics banner. Until `Pulse.init()` runs, every `Pulse.*` capture call is a silent no-op — including on the server, where the SDK never initializes, so a server-side `Err.*` reaches Sentry only. (`Pulse.reset()` is the exception: it deletes stored `pulse.*` state even on a page that never initialized, which is how a returning tab cleans up.) `initializePulseConsent()` in `src/libs/observability/pulse.ts` installs the gate from `src/instrumentation-client.ts` before any app code runs, and a withdrawal calls `Pulse.reset()`, which disables collection without flushing and deletes the anonymous id, session and queued events. The consent storage, the cross-tab generation marker and the user-facing controls are documented in [environment.md](environment.md).
 
 - **One drop policy for both sinks.** `beforeSendPulse` re-applies `shouldDropCapturedExceptionFromSentry` and `sanitizeForSentry` from `sentry.utils.ts` to every event, so a rule added to `APP_ERROR_DROP_RULES` and a key added to the scrubber cover Sentry and Pulse together. Nothing Pulse-specific should be filtered elsewhere. `beforeSendPulse` also drops everything once consent is withdrawn, or when this tab's Pulse state predates the current consent.
 - **One `ignoreErrors` list.** Both initializers spread `OBSERVABILITY_IGNORE_ERRORS` from `sentry.constants.ts`; add a noise pattern there, never in one SDK's options, or the two dashboards drift.
