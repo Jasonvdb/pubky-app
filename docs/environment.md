@@ -95,9 +95,11 @@ an identifier and neither is sent; they only let a tab that was suspended or awa
 notice it on its next run and clean up then. A withdrawal deletes the browser-wide state, so accepting
 again starts a new anonymous browser in every tab; the stale tab deletes its own client and session
 alone, because the anonymous ID and queued events it finds now belong to the current consent and other
-tabs are still using them. Events that tab had queued before it went stale stay queued and are sent by
-whichever tab flushes next. Users can withdraw in **Settings → Privacy and Safety** or the **Pulse analytics** button
-(also available to guests). Withdrawal stops collection without flushing and deletes the anonymous ID,
+tabs are still using them. One limit sits in the SDK: it cannot tell whose events are in the shared
+queue, and replayed events are not filtered again. So an event a suspended tab re-queues after another
+tab's withdrawal already ran (a failed retry, or an unload) can still be sent by whichever tab flushes
+next. Users can withdraw in **Settings → Privacy and Safety** or the **Pulse analytics** button (also
+available to guests). Withdrawal stops collection without flushing and deletes the anonymous ID,
 session and any queued events from this browser; it does not delete data the server already received.
 Without a key — or on a testnet deploy (`PUBKY_RUNTIME_TESTNET=true`), which disables Pulse exactly as it
 disables Sentry — neither the banner nor analytics controls appear, and nothing is collected.
