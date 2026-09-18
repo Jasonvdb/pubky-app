@@ -134,6 +134,10 @@ describe('Pulse consent', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Pubky Pulse analytics' }));
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('accepted');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // The banner is still open, and its way out must not disappear with the error.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('region', { name: 'Pubky Pulse analytics consent' })).not.toBeInTheDocument();
+    expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('accepted');
   });
 });
 

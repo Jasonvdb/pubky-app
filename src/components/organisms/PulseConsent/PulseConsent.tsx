@@ -59,8 +59,10 @@ export function PulseConsentBanner() {
         <Button variant="secondary" className="flex-1" onClick={() => setOpen(!choose(true))}>
           Accept
         </Button>
-        {saveFailed && (
-          // A failed save keeps the banner open to show the error, so it needs its own way out.
+        {consent !== null && (
+          // Once a choice exists the banner is only open because it was reopened or a save failed, so it needs
+          // a way out that leaves the choice alone. Not tied to saveFailed: another control can clear that error
+          // while this banner is still open. A first visit has no choice yet and must pick one.
           <Button variant="secondary" className="flex-1" onClick={() => setOpen(false)}>
             Close
           </Button>

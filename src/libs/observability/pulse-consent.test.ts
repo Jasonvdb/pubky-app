@@ -148,6 +148,17 @@ describe('consent gate with the real Pulse SDK', () => {
     expect(sdkKeys(sessionStorage)).toEqual([]);
   });
 
+  it('deletes the state an earlier load stored once the deploy is a testnet', () => {
+    otherTabAccepts();
+    unsubscribe = initializePulseConsent();
+    expect(localStorage.getItem('pulse.anonymous_id')).not.toBeNull();
+    config.testnet = true;
+    window.dispatchEvent(new Event('focus'));
+    expect(Pulse.currentUserId).toBeUndefined();
+    expect(sdkKeys(localStorage)).toEqual([]);
+    expect(sdkKeys(sessionStorage)).toEqual([]);
+  });
+
   it('starts only after acceptance and stops without flushing on withdrawal', async () => {
     unsubscribe = initializePulseConsent();
     setPulseConsent(true);
@@ -409,8 +420,8 @@ describe('consent gate with the real Pulse SDK', () => {
   });
 
   it('retries on the next sync when init fails instead of reporting Pulse as running', async () => {
-    // The consent gate only requires a non-empty key, while the SDK also requires its client prefix, so a key
-    // the app accepts can still make Pulse.init report an error instead of throwing.
+    // Pulse.init reports a refused or failed start through its result instead of throwing. A key the SDK
+    // rejects forces that path here; outside this mock the runtime-config schema would reject it first.
     config.key = 'not_a_pulse_client_key';
     otherTabAccepts();
     unsubscribe = initializePulseConsent();
