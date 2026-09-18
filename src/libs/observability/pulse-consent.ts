@@ -1,4 +1,4 @@
-import { getPulseClientKey } from '@/libs/runtime-config/runtime-config';
+import { getPulseClientKey, getTestnet } from '@/libs/runtime-config/runtime-config';
 
 // Version the choice when the disclosed purposes change. This is not an analytics identifier.
 export const PULSE_CONSENT_KEY = 'pubky-pulse-consent-v1';
@@ -12,7 +12,10 @@ let declinedInMemory = false;
 
 export function getPulseConsent(): PulseConsent {
   try {
-    if (typeof window === 'undefined' || !getPulseClientKey()?.trim()) return 'unavailable';
+    // A testnet deploy sends no telemetry, the same rule shouldEnableSentry() applies to Sentry (ADR 0018):
+    // one image promoted to testnet must not collect. Gating availability here — not in initPulse() — keeps
+    // the SDK, the banner and the settings switch off together.
+    if (typeof window === 'undefined' || getTestnet() || !getPulseClientKey()?.trim()) return 'unavailable';
   } catch {
     return 'unavailable';
   }

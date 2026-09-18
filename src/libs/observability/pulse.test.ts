@@ -66,6 +66,11 @@ describe('optional Pulse initialization', () => {
     initPulse();
     expect(Pulse.init).not.toHaveBeenCalled();
   });
+  it('never initializes on a testnet deploy', () => {
+    inject({ testnet: true });
+    initPulse();
+    expect(Pulse.init).not.toHaveBeenCalled();
+  });
   it('wires app configuration, privacy hooks and the existing ignore policy', () => {
     initPulse();
     expect(Pulse.init).toHaveBeenCalledExactlyOnceWith({

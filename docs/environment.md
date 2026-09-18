@@ -93,7 +93,8 @@ notice it on its next run and delete its state then. Re-accepting starts a new a
 every tab. Users can withdraw in **Settings → Privacy and Safety** or the **Analytics settings** button
 (also available to guests). Withdrawal stops collection without flushing and deletes the anonymous ID,
 session and any queued events from this browser; it does not delete data the server already received.
-Without a key, neither the banner nor analytics controls appear.
+Without a key — or on a testnet deploy (`PUBKY_RUNTIME_TESTNET=true`), which disables Pulse exactly as it
+disables Sentry — neither the banner nor analytics controls appear, and nothing is collected.
 Only consented visits are measured, so analytics are a partial, self-selected view of usage.
 
 ### Why a separate mechanism

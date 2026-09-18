@@ -3,11 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PULSE_CONSENT_KEY, setPulseConsent } from '@/libs/observability/pulse-consent';
 import { PulseConsentBanner, PulseConsentSettings } from './PulseConsent';
 
-const config = vi.hoisted(() => ({ key: 'pulse_client_test' as string | undefined }));
-vi.mock('@/libs/runtime-config/runtime-config', () => ({ getPulseClientKey: () => config.key }));
+const config = vi.hoisted(() => ({ key: 'pulse_client_test' as string | undefined, testnet: false }));
+vi.mock('@/libs/runtime-config/runtime-config', () => ({
+  getPulseClientKey: () => config.key,
+  getTestnet: () => config.testnet,
+}));
 
 beforeEach(() => {
   config.key = 'pulse_client_test';
+  config.testnet = false;
   // Reset the in-memory refusal fallback using the public choice API, then start from empty storage:
   // accepting also writes the acceptance time, which must not leak into the next test.
   setPulseConsent(true);
@@ -22,6 +26,17 @@ afterEach(() => {
 describe('Pulse consent', () => {
   it.each([undefined, '', '   '])('renders no banner or settings without a key (%s)', (key) => {
     config.key = key;
+    const { container } = render(
+      <>
+        <PulseConsentBanner />
+        <PulseConsentSettings />
+      </>,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('renders no banner or settings on a testnet deploy', () => {
+    config.testnet = true;
     const { container } = render(
       <>
         <PulseConsentBanner />

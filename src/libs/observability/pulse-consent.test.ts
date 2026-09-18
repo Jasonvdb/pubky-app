@@ -4,13 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { beforeSendPulse, initializePulseConsent, initPulse } from './pulse';
 import { getPulseConsent, PULSE_CONSENT_GRANTED_AT_KEY, PULSE_CONSENT_KEY, setPulseConsent } from './pulse-consent';
 
-const config = vi.hoisted(() => ({ key: 'pulse_client_test' as string | undefined }));
+const config = vi.hoisted(() => ({ key: 'pulse_client_test' as string | undefined, testnet: false }));
 vi.mock('@/libs/env/env', () => ({ Env: { NODE_ENV: 'production', NEXT_PUBLIC_APP_VERSION: 'test' } }));
+// getTestnet is overridden too: the real one reads PUBKY_RUNTIME_TESTNET, which src/config/test.ts sets.
 vi.mock('@/libs/runtime-config/runtime-config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/libs/runtime-config/runtime-config')>()),
   getPulseClientKey: () => config.key,
   getPulseEndpoint: () => 'http://localhost:4007/pulse',
   getDeployEnv: () => 'staging',
+  getTestnet: () => config.testnet,
 }));
 
 let unsubscribe: (() => void) | undefined;
@@ -70,6 +72,7 @@ function returnToPage(): void {
 
 beforeEach(() => {
   config.key = 'pulse_client_test';
+  config.testnet = false;
   localStorage.clear();
   sessionStorage.clear();
   // Reset the in-memory refusal fallback using the public choice API.
@@ -125,6 +128,19 @@ describe('consent gate with the real Pulse SDK', () => {
       expect(requests).not.toHaveBeenCalled();
     },
   );
+
+  it('collects nothing on a testnet deploy, the gate Sentry already applies', async () => {
+    config.testnet = true;
+    localStorage.setItem(PULSE_CONSENT_KEY, 'accepted');
+    unsubscribe = initializePulseConsent();
+    initPulse();
+    Pulse.captureException(new Error('On testnet'));
+    await Pulse.flush();
+    expect(getPulseConsent()).toBe('unavailable');
+    expect(requests).not.toHaveBeenCalled();
+    expect(sdkKeys(localStorage)).toEqual([]);
+    expect(sdkKeys(sessionStorage)).toEqual([]);
+  });
 
   it('starts only after acceptance and stops without flushing on withdrawal', async () => {
     unsubscribe = initializePulseConsent();
