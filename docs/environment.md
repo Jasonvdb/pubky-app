@@ -91,12 +91,16 @@ and accepting also stores the acceptance time as `pubky-pulse-consent-v1-granted
 mirrors in a `sessionStorage` marker naming the consent its own Pulse state started under. Neither is
 an identifier and neither is sent; they only let a tab that was suspended or away during a withdrawal
 notice it on its next run and delete its state then. Re-accepting starts a new anonymous browser in
-every tab. Users can withdraw in **Settings → Privacy and Safety** or the **Analytics settings** button
+every tab. Users can withdraw in **Settings → Privacy and Safety** or the **Pulse analytics** button
 (also available to guests). Withdrawal stops collection without flushing and deletes the anonymous ID,
 session and any queued events from this browser; it does not delete data the server already received.
 Without a key — or on a testnet deploy (`PUBKY_RUNTIME_TESTNET=true`), which disables Pulse exactly as it
 disables Sentry — neither the banner nor analytics controls appear, and nothing is collected.
 Only consented visits are measured, so analytics are a partial, self-selected view of usage.
+This consent covers Pulse only, which is why the banner scopes its promise to Pubky Pulse rather than to
+analytics in general: the optional Plausible script (`PUBKY_RUNTIME_PLAUSIBLE_DOMAIN` /
+`PUBKY_RUNTIME_PLAUSIBLE_SCRIPT_URL`) is cookieless, stores no identifier, and is configured and served
+independently of it.
 
 ### Why a separate mechanism
 

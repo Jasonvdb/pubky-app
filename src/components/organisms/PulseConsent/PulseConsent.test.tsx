@@ -58,11 +58,11 @@ describe('Pulse consent', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('accepted');
-    expect(screen.getByRole('switch', { name: 'Optional analytics' })).toBeChecked();
-    fireEvent.click(screen.getByRole('button', { name: 'Analytics settings' }));
+    expect(screen.getByRole('switch', { name: 'Pubky Pulse analytics' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Pulse analytics' }));
     fireEvent.click(screen.getByRole('button', { name: 'Withdraw consent' }));
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('declined');
-    expect(screen.getByRole('switch', { name: 'Optional analytics' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Pubky Pulse analytics' })).not.toBeChecked();
   });
 
   it('persists refusal and supports changing the choice in settings', () => {
@@ -80,10 +80,10 @@ describe('Pulse consent', () => {
         <PulseConsentSettings />
       </>,
     );
-    expect(screen.queryByRole('region', { name: 'Analytics consent' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('switch', { name: 'Optional analytics' }));
+    expect(screen.queryByRole('region', { name: 'Pubky Pulse analytics consent' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: 'Pubky Pulse analytics' }));
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('accepted');
-    fireEvent.click(screen.getByRole('switch', { name: 'Optional analytics' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Pubky Pulse analytics' }));
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('declined');
   });
 
@@ -94,27 +94,27 @@ describe('Pulse consent', () => {
       localStorage.setItem(PULSE_CONSENT_KEY, 'declined');
       window.dispatchEvent(new StorageEvent('storage', { key: PULSE_CONSENT_KEY }));
     });
-    expect(screen.getByRole('switch', { name: 'Optional analytics' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Pubky Pulse analytics' })).not.toBeChecked();
   });
 
-  it('explains a failed save, leaves analytics off and lets the visitor close the banner and retry', () => {
+  it('explains a failed save, leaves Pulse off and lets the visitor close the banner and retry', () => {
     render(<PulseConsentBanner />);
     const blocked = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Blocked');
     });
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Analytics is off');
+    expect(screen.getByRole('alert')).toHaveTextContent('Pubky Pulse is off');
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('region', { name: 'Analytics consent' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Analytics settings' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Analytics is off');
+    expect(screen.queryByRole('region', { name: 'Pubky Pulse analytics consent' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Pulse analytics' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Pubky Pulse is off');
     blocked.mockRestore();
     fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('accepted');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Analytics consent' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Analytics settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Pubky Pulse analytics consent' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pulse analytics' })).toBeInTheDocument();
   });
 
   it('clears the save error once another control stores the choice', () => {
@@ -131,7 +131,7 @@ describe('Pulse consent', () => {
     // Nothing is stored, so both controls say so: the failure is a fact about the tab, not about one of them.
     expect(screen.getAllByRole('alert')).toHaveLength(2);
     blocked.mockRestore();
-    fireEvent.click(screen.getByRole('switch', { name: 'Optional analytics' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Pubky Pulse analytics' }));
     expect(localStorage.getItem(PULSE_CONSENT_KEY)).toBe('accepted');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });

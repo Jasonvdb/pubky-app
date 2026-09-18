@@ -8,7 +8,8 @@ import { SettingsSwitchItem } from '@/molecules/Settings/SettingsSwitchItem/Sett
 
 const CONSENT_DESCRIPTION =
   'Allow Pubky Pulse to store an anonymous ID in this browser and measure how you use Pubky across visits, including page views, errors, and which browser and operating system you use. This helps us improve the app.';
-const SAVE_ERROR = 'Analytics is off, but your choice could not be saved. Please check your browser storage settings.';
+const SAVE_ERROR =
+  'Pubky Pulse is off, but your choice could not be saved. Please check your browser storage settings.';
 
 export function PulseConsentBanner() {
   const { consent, choose, saveFailed } = usePulseConsent();
@@ -24,14 +25,14 @@ export function PulseConsentBanner() {
         className="fixed bottom-24 left-4 z-40 text-xs sm:bottom-4"
         onClick={() => setOpen(true)}
       >
-        Analytics settings
+        Pulse analytics
       </Button>
     );
   }
 
   return (
     <section
-      aria-label="Analytics consent"
+      aria-label="Pubky Pulse analytics consent"
       className="fixed inset-x-4 bottom-24 z-50 mx-auto flex max-w-2xl flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-lg sm:bottom-4 sm:p-6"
     >
       <div className="space-y-2">
@@ -42,8 +43,8 @@ export function PulseConsentBanner() {
           {CONSENT_DESCRIPTION}
         </Typography>
         <Typography size="sm" className="text-muted-foreground">
-          Optional. You can use Pubky without analytics and change your choice anytime in Analytics settings or Settings
-          → Privacy and Safety.
+          Optional, and this choice covers Pubky Pulse only. You can use Pubky with Pulse off, and change your choice
+          anytime in Pulse analytics or Settings → Privacy and Safety.
         </Typography>
       </div>
       {saveFailed && (
@@ -76,7 +77,7 @@ export function PulseConsentSettings() {
     <div className="space-y-3">
       <SettingsSwitchItem
         id="pulse-analytics-consent"
-        label="Optional analytics"
+        label="Pubky Pulse analytics"
         description={`${CONSENT_DESCRIPTION} Turn off anytime to withdraw consent on this browser.`}
         checked={consent === 'accepted'}
         onChange={choose}
